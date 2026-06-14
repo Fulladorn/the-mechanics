@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+.vite/
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Test / coverage artifacts
+coverage/
+.nyc_output/
+test-results/
+screenshots/
+*.tour.png
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+*.swp
+
+# Asset working files (keep source-of-truth glTF in content/, ignore exports)
+content/assets/_raw/
+*.blend1
+
+# Postgres local data
+pgdata/

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Mechanics — Garage (Training)</title>
+    <style>
+      :root {
+        --accent: #ffcf3f;
+        --accent2: #38e0c8;
+        --danger: #ff5d5d;
+        --panel: rgba(16, 20, 28, 0.82);
+      }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; }
+      body {
+        font-family: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+        color: #f4f7fb;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      #app { position: fixed; inset: 0; }
+      canvas { display: block; }
+
+      /* ---------- HUD ---------- */
+      #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+
+      #crosshair {
+        position: fixed; left: 50%; top: 50%;
+        width: 8px; height: 8px; margin: -4px 0 0 -4px;
+        border: 2px solid rgba(255, 255, 255, 0.85);
+        border-radius: 50%;
+        transition: transform 0.08s ease, border-color 0.08s ease;
+      }
+      #crosshair.active { transform: scale(1.7); border-color: var(--accent); }
+
+      #prompt {
+        position: fixed; left: 50%; top: 58%; transform: translateX(-50%);
+        background: var(--panel); padding: 8px 14px; border-radius: 8px;
+        font-size: 15px; letter-spacing: 0.3px; opacity: 0; transition: opacity 0.1s;
+        border: 1px solid rgba(255,255,255,0.12);
+      }
+      #prompt .key {
+        display: inline-block; background: var(--accent); color: #1a1205;
+        font-weight: 700; border-radius: 5px; padding: 1px 7px; margin-right: 7px;
+      }
+
+      #speedo {
+        position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
+        text-align: center; font-variant-numeric: tabular-nums;
+      }
+      #speedo .val { font-size: 30px; font-weight: 800; color: var(--accent2); line-height: 1; }
+      #speedo .unit { font-size: 11px; opacity: 0.65; letter-spacing: 2px; }
+      #speedo.fast .val { color: var(--accent); text-shadow: 0 0 14px rgba(255,207,63,0.65); }
+
+      #hotbar {
+        position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+        display: flex; gap: 8px;
+      }
+      .slot {
+        width: 56px; height: 56px; border-radius: 10px;
+        background: var(--panel); border: 2px solid rgba(255,255,255,0.14);
+        display: flex; align-items: center; justify-content: center;
+        position: relative; font-size: 26px;
+      }
+      .slot.sel { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(255,207,63,0.25); }
+      .slot .num {
+        position: absolute; top: 2px; left: 5px; font-size: 10px; opacity: 0.5;
+      }
+      .slot .label {
+        position: absolute; bottom: -18px; left: 50%; transform: translateX(-50%);
+        font-size: 10px; white-space: nowrap; opacity: 0.8;
+      }
+
+      #objectives {
+        position: fixed; top: 18px; right: 18px; width: 290px;
+        background: var(--panel); border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 10px; padding: 14px 16px; pointer-events: none;
+      }
+      #objectives h3 {
+        font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
+        color: var(--accent); margin-bottom: 10px;
+      }
+      #objectives ul { list-style: none; }
+      #objectives li {
+        font-size: 13px; padding: 4px 0 4px 24px; position: relative; opacity: 0.55;
+        line-height: 1.3;
+      }
+      #objectives li::before {
+        content: "○"; position: absolute; left: 4px; top: 4px; color: rgba(255,255,255,0.5);
+      }
+      #objectives li.active { opacity: 1; }
+      #objectives li.active::before { content: "▶"; color: var(--accent); }
+      #objectives li.done { opacity: 0.5; text-decoration: line-through; }
+      #objectives li.done::before { content: "✓"; color: var(--accent2); text-decoration: none; }
+
+      /* ---------- Overlays ---------- */
+      .overlay {
+        position: fixed; inset: 0; z-index: 30;
+        display: flex; align-items: center; justify-content: center;
+        background: rgba(7, 9, 14, 0.72); backdrop-filter: blur(3px);
+        pointer-events: auto;
+      }
+      .overlay.hidden { display: none; }
+
+      #start-card, #win-card {
+        max-width: 540px; text-align: center; padding: 38px 42px;
+        background: linear-gradient(160deg, #182030, #0f1622);
+        border: 1px solid rgba(255,255,255,0.12); border-radius: 16px;
+      }
+      #start-card h1, #win-card h1 {
+        font-size: 34px; margin-bottom: 6px;
+        background: linear-gradient(90deg, var(--accent), var(--accent2));
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .tag { opacity: 0.7; font-size: 14px; margin-bottom: 22px; }
+      .controls-grid {
+        display: grid; grid-template-columns: auto 1fr; gap: 6px 14px;
+        text-align: left; font-size: 13px; margin: 0 auto 26px; max-width: 360px;
+      }
+      .controls-grid .k {
+        background: rgba(255,255,255,0.1); border-radius: 5px; padding: 2px 8px;
+        font-weight: 700; text-align: center; white-space: nowrap;
+      }
+      .btn {
+        pointer-events: auto; cursor: pointer; border: none;
+        background: linear-gradient(90deg, var(--accent), #ffb01f); color: #1a1205;
+        font-weight: 800; font-size: 16px; letter-spacing: 0.5px;
+        padding: 13px 30px; border-radius: 10px; transition: transform 0.06s;
+      }
+      .btn:hover { transform: translateY(-1px); }
+      .btn:active { transform: translateY(1px); }
+      #win-card .sub { opacity: 0.8; font-size: 15px; margin-bottom: 24px; line-height: 1.5; }
+
+      #toast {
+        position: fixed; left: 50%; top: 22%; transform: translateX(-50%) translateY(-8px);
+        background: var(--panel); border: 1px solid var(--accent);
+        padding: 10px 18px; border-radius: 10px; font-size: 15px; font-weight: 600;
+        opacity: 0; transition: opacity 0.25s, transform 0.25s; z-index: 20;
+      }
+      #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      #loading {
+        position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; background: #0b0e14; gap: 18px;
+      }
+      #loading .spin {
+        width: 42px; height: 42px; border: 4px solid rgba(255,255,255,0.15);
+        border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #loading .msg { font-size: 13px; letter-spacing: 1px; opacity: 0.7; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud">
+      <div id="crosshair"></div>
+      <div id="prompt"></div>
+      <div id="speedo"><div class="val">0.0</div><div class="unit">M/S</div></div>
+      <div id="hotbar"></div>
+      <div id="objectives"><h3>Training Checklist</h3><ul></ul></div>
+    </div>
+
+    <div id="toast"></div>
+
+    <div id="loading"><div class="spin"></div><div class="msg">PREPARING GARAGE…</div></div>
+
+    <div id="start" class="overlay hidden">
+      <div id="start-card">
+        <h1>THE MECHANICS</h1>
+        <div class="tag">Training Bay — learn the ropes before deployment.</div>
+        <div class="controls-grid">
+          <span class="k">W A S D</span><span>Move</span>
+          <span class="k">Mouse</span><span>Look</span>
+          <span class="k">Space</span><span>Jump — hold to bunny-hop &amp; build speed</span>
+          <span class="k">Ctrl</span><span>Crouch (crouch-jump)</span>
+          <span class="k">Shift</span><span>Sprint</span>
+          <span class="k">E</span><span>Interact / pick up / enter</span>
+          <span class="k">G</span><span>Drop carried part</span>
+          <span class="k">1–6 / Scroll</span><span>Select toolbelt slot</span>
+        </div>
+        <button class="btn" id="start-btn">CLOCK IN ▶</button>
+      </div>
+    </div>
+
+    <div id="win" class="overlay hidden">
+      <div id="win-card">
+        <h1>TRAINING COMPLETE</h1>
+        <div class="sub"></div>
+        <button class="btn" id="win-btn">RUN IT BACK</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/client/main.ts"></script>
+  </body>
+</html>

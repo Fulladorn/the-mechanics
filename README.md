@@ -19,8 +19,12 @@ Reliable Delivery Service**.
 
 ## Status
 
-🟢 **Planning complete.** This repo currently contains the full design and
-technical plan. Implementation follows the phased roadmap below.
+🟢 **Playable: the Garage (training level).** A single-player vertical slice is
+up and running — first-person movement with **bunny-hopping**, look-to-interact
+**pickup + toolbelt**, a **wire-match repair puzzle**, **carry-and-install** an
+engine, and **driving a go-kart** through a checkpoint loop, all tied together
+with tutorial objectives and a "clock out" finish. Co-op netcode and the three
+real missions come next, per the roadmap.
 
 - [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md) — the complete game design document (what we're building)
 - [`docs/TECH_ARCHITECTURE.md`](docs/TECH_ARCHITECTURE.md) — the engineering plan (how we build it)
@@ -51,13 +55,27 @@ technical plan. Implementation follows the phased roadmap below.
 
 See [`docs/TECH_ARCHITECTURE.md`](docs/TECH_ARCHITECTURE.md) for the full rationale.
 
-## Quick start (once implemented — see roadmap)
+## Quick start
 
 ```bash
 npm install
-npm run dev        # client (Vite) on :5173 + server on :8787
-# open two browser tabs, host in one, join with the code in the other
+npm run dev        # Vite dev server on http://localhost:5173
+# open it, click CLOCK IN, and play the training bay
 ```
+
+Other scripts:
+
+```bash
+npm test           # vitest: movement, puzzle, and a full headless playthrough
+npm run typecheck  # tsc --noEmit
+npm run build      # production build to dist/
+npm run shot       # headless screenshot smoke test (needs: npm i -D puppeteer)
+```
+
+**Controls:** `WASD` move · mouse look · `Space` jump (hold to bunny-hop) ·
+`Shift` sprint · `Ctrl` crouch · `E` interact/pickup · `G` drop · `1–6`/scroll
+toolbelt. Build speed by holding `Space` and air-strafing (`A`/`D` + mouse) to
+open the speed gate.
 
 ## Repository layout
 

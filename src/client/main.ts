@@ -51,6 +51,24 @@ function boot(): void {
         if (p.yaw !== undefined) input.yaw = p.yaw;
         debugIntent = it;
       },
+      look: (yaw: number, pitch = 0) => {
+        input.yaw = yaw;
+        input.pitch = pitch;
+      },
+      stop: () => {
+        debugIntent = makeIntent();
+      },
+      teleport: (x: number, z: number, yaw = 0, pitch = 0) => {
+        const p = world.player;
+        p.mode = 'foot';
+        p.pos.x = x;
+        p.pos.z = z;
+        p.pos.y = 0;
+        p.vel.x = p.vel.y = p.vel.z = 0;
+        input.yaw = yaw;
+        input.pitch = pitch;
+        debugIntent = makeIntent();
+      },
     };
   }
 

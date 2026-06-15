@@ -3,7 +3,18 @@ import { lerp, lerpAngle, type Vec3 } from '../../shared/math';
 import { CHECKPOINT_RADIUS } from '../../shared/constants';
 import type { World } from '../../sim/world';
 import { ITEM_DEFS, type ItemKind } from '../../shared/types';
-import { floorTexture, stripeTexture, chevronTexture } from './textures';
+import {
+  floorTexture,
+  stripeTexture,
+  chevronTexture,
+  wallPanelTexture,
+  doorTexture,
+  metalTexture,
+  tireTexture,
+  posterTexture,
+  skyTexture,
+} from './textures';
+import type { Prop } from '../../content/levels/garage';
 
 const closedGateY = (b: { center: Vec3 }) => b.center.y;
 
@@ -40,9 +51,10 @@ export class GameView {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(this.renderer.domElement);
 
+    const ext = world.level.exterior;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x1b2740);
-    this.scene.fog = new THREE.Fog(0x1b2740, 45, 100);
+    this.scene.background = new THREE.Color(ext.fogColor);
+    this.scene.fog = new THREE.Fog(ext.fogColor, ext.fogNear, ext.fogFar);
 
     const hemi = new THREE.HemisphereLight(0xcfe4ff, 0x53483a, 1.15);
     this.scene.add(hemi);
@@ -63,7 +75,10 @@ export class GameView {
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
 
+    this.buildSky();
+    this.buildExterior();
     this.buildStatics();
+    this.buildProps();
     this.buildGate();
     this.buildLaneDeco();
     this.buildItems();
@@ -100,15 +115,29 @@ export class GameView {
 
   private buildStatics(): void {
     const floorTex = floorTexture();
+    const wallTex = wallPanelTexture();
+    const doorMat = new THREE.MeshStandardMaterial({
+      map: metalTexture('#2a2f3a'),
+      metalness: 0.6,
+      roughness: 0.4,
+    });
     for (const s of this.world.level.solids) {
+      if (s.hidden) continue;
       let mat: THREE.Material;
       if (s.tag === 'floor') {
         floorTex.repeat.set(s.box.half.x, s.box.half.z);
-        mat = new THREE.MeshStandardMaterial({ map: floorTex, color: 0xffffff, roughness: 0.96 });
+        mat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.96 });
+      } else if (s.tag === 'wall' || s.tag === 'divider') {
+        const t = wallTex.clone();
+        t.needsUpdate = true;
+        t.repeat.set(Math.max(s.box.half.x, s.box.half.z) / 2, Math.max(s.box.half.y, 1) / 1.5);
+        mat = new THREE.MeshStandardMaterial({ map: t, color: s.color, roughness: 0.85, metalness: 0.12 });
+      } else if (s.tag === 'door') {
+        mat = doorMat;
       } else {
         mat = new THREE.MeshStandardMaterial({
           color: s.color,
-          roughness: s.tag === 'wall' || s.tag === 'divider' ? 0.9 : 0.6,
+          roughness: 0.6,
           metalness: s.tag === 'cabinet' || s.tag === 'pallet' ? 0.4 : 0.05,
         });
       }
@@ -273,6 +302,321 @@ export class GameView {
       this.camera.add(tool);
       this.heldTools.set(kind, tool);
     }
+  }
+
+  // ---- small mesh helpers for procedural props ----
+  private mat(color: number, metalness = 0.3, roughness = 0.6, emissive = 0x000000, ei = 0) {
+    return new THREE.MeshStandardMaterial({ color, metalness, roughness, emissive, emissiveIntensity: ei });
+  }
+  private bx(w: number, h: number, d: number, color: number, metalness = 0.3, roughness = 0.6): THREE.Mesh {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), this.mat(color, metalness, roughness));
+    m.receiveShadow = true;
+    return m;
+  }
+  private cy(rt: number, rb: number, h: number, color: number, seg = 14, metalness = 0.4, roughness = 0.5): THREE.Mesh {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), this.mat(color, metalness, roughness));
+    m.receiveShadow = true;
+    return m;
+  }
+
+  private buildSky(): void {
+    const ext = this.world.level.exterior;
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(180, 24, 16),
+      new THREE.MeshBasicMaterial({ map: skyTexture(ext.skyTop, ext.skyHorizon), side: THREE.BackSide, fog: false, depthWrite: false }),
+    );
+    this.scene.add(dome);
+  }
+
+  private buildExterior(): void {
+    const ext = this.world.level.exterior;
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(420, 380),
+      new THREE.MeshStandardMaterial({ color: ext.ground, roughness: 1 }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(0, -0.02, 130);
+    ground.receiveShadow = true;
+    this.scene.add(ground);
+    // a rolled-up door bundle tucked under the lintel
+    const door = new THREE.Mesh(
+      new THREE.BoxGeometry(10, 0.7, 0.5),
+      new THREE.MeshStandardMaterial({ map: doorTexture(), metalness: 0.3, roughness: 0.6 }),
+    );
+    door.position.set(0, 4.35, 20.35);
+    this.scene.add(door);
+  }
+
+  private buildProps(): void {
+    const props = this.world.level.props;
+    // instanced (repeated) kinds for flat draw-call cost
+    this.instanceProps(
+      props.filter((p) => p.kind === 'ceilingLight'),
+      new THREE.BoxGeometry(2.4, 0.14, 0.6),
+      new THREE.MeshStandardMaterial({ color: 0xfff4d8, emissive: 0xfff0cf, emissiveIntensity: 1.4 }),
+      0,
+    );
+    this.instanceProps(
+      props.filter((p) => p.kind === 'window'),
+      new THREE.PlaneGeometry(2.6, 1.7),
+      new THREE.MeshStandardMaterial({ color: 0xa9cdef, emissive: 0x9ec4ec, emissiveIntensity: 0.85, side: THREE.DoubleSide }),
+      0,
+    );
+    this.instanceProps(
+      props.filter((p) => p.kind === 'fence'),
+      new THREE.BoxGeometry(0.1, 1.5, 0.1),
+      this.mat(0x6a7180, 0.6, 0.5),
+      0.75,
+    );
+    const inst = new Set(['ceilingLight', 'window', 'fence']);
+    for (const p of props) {
+      if (inst.has(p.kind)) continue;
+      const o = this.buildProp(p);
+      if (!o) continue;
+      o.position.set(p.pos.x, p.pos.y, p.pos.z);
+      if (p.rot) o.rotation.y = p.rot;
+      if (p.scale && p.scale !== 1) o.scale.setScalar(p.scale);
+      this.scene.add(o);
+    }
+  }
+
+  private instanceProps(list: Prop[], geo: THREE.BufferGeometry, material: THREE.Material, yOff: number): void {
+    if (!list.length) return;
+    const im = new THREE.InstancedMesh(geo, material, list.length);
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+    list.forEach((p, i) => {
+      q.setFromEuler(new THREE.Euler(0, p.rot ?? 0, 0));
+      s.setScalar(p.scale ?? 1);
+      m.compose(new THREE.Vector3(p.pos.x, p.pos.y + yOff, p.pos.z), q, s);
+      im.setMatrixAt(i, m);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    this.scene.add(im);
+  }
+
+  private buildProp(p: Prop): THREE.Object3D | null {
+    switch (p.kind) {
+      case 'barrel':
+        return this.makeBarrel(p.color ?? 0x3f7d4f);
+      case 'tire':
+        return this.makeTireStack();
+      case 'toolbox':
+        return this.makeToolbox(p.color ?? 0xd14b3a);
+      case 'jackstand':
+        return this.makeJackstand();
+      case 'hoist':
+        return this.makeHoist();
+      case 'shelf':
+        return this.makeShelf();
+      case 'toolwall':
+        return this.makeToolwall();
+      case 'poster':
+        return this.makePoster(false);
+      case 'posterSymbol':
+        return this.makePoster(true);
+      case 'pipe':
+        return this.makePipe(p.scale ?? 1);
+      case 'cone':
+        return this.makeCone();
+      case 'parkingLine':
+        return this.makeParkingLines();
+      case 'van':
+        return this.makeVan(p.color ?? 0x394b6b);
+      case 'yardLight':
+        return this.makeYardLight();
+      case 'silhouette':
+        return this.makeSilhouette(p.color ?? 0x2c3550);
+      default:
+        return null;
+    }
+  }
+
+  private makeBarrel(color: number): THREE.Group {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 1.0, 16), new THREE.MeshStandardMaterial({ map: metalTexture('#888'), color, metalness: 0.5, roughness: 0.5 }));
+    body.position.y = 0.5;
+    body.castShadow = true;
+    const top = this.cy(0.36, 0.36, 0.07, 0x202225, 16);
+    top.position.y = 1.0;
+    const rim = this.cy(0.36, 0.36, 0.05, 0x202225, 16);
+    rim.position.y = 0.55;
+    g.add(body, top, rim);
+    return g;
+  }
+
+  private makeTireStack(): THREE.Group {
+    const g = new THREE.Group();
+    const tex = tireTexture();
+    for (let i = 0; i < 3; i++) {
+      const t = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.32, 18), new THREE.MeshStandardMaterial({ map: tex, color: 0x20232a, roughness: 0.9 }));
+      t.position.y = 0.16 + i * 0.32;
+      t.castShadow = true;
+      g.add(t);
+    }
+    return g;
+  }
+
+  private makeToolbox(color: number): THREE.Group {
+    const g = new THREE.Group();
+    const body = this.bx(0.7, 0.36, 0.42, color, 0.3, 0.5);
+    body.position.y = 0.18;
+    body.castShadow = true;
+    const lid = this.bx(0.74, 0.1, 0.46, color, 0.3, 0.5);
+    lid.position.y = 0.4;
+    const handle = this.bx(0.3, 0.05, 0.05, 0x222222);
+    handle.position.y = 0.5;
+    g.add(body, lid, handle);
+    return g;
+  }
+
+  private makeJackstand(): THREE.Group {
+    const g = new THREE.Group();
+    const base = this.cy(0.26, 0.32, 0.1, 0x9aa0aa, 4);
+    base.position.y = 0.05;
+    const post = this.bx(0.08, 0.5, 0.08, 0xb6bcc6, 0.6, 0.4);
+    post.position.y = 0.32;
+    const saddle = this.bx(0.2, 0.08, 0.12, 0xb6bcc6, 0.6, 0.4);
+    saddle.position.y = 0.58;
+    g.add(base, post, saddle);
+    return g;
+  }
+
+  private makeHoist(): THREE.Group {
+    const g = new THREE.Group();
+    const steel = 0xd1772f;
+    const mast = this.bx(0.16, 2.3, 0.16, steel, 0.5, 0.5);
+    mast.position.set(-0.7, 1.15, 0);
+    const leg = this.bx(0.16, 0.14, 1.8, steel, 0.5, 0.5);
+    leg.position.set(-0.7, 0.07, 0);
+    const arm = this.bx(1.7, 0.16, 0.16, steel, 0.5, 0.5);
+    arm.position.set(0.1, 2.1, 0);
+    const chain = this.cy(0.03, 0.03, 0.8, 0x555a63, 6);
+    chain.position.set(0.85, 1.6, 0);
+    const engine = this.makeEngineMesh();
+    engine.scale.setScalar(0.6);
+    engine.position.set(0.85, 1.0, 0);
+    g.add(mast, leg, arm, chain, engine);
+    return g;
+  }
+
+  private makeShelf(): THREE.Group {
+    const g = new THREE.Group();
+    const frame = 0x4a5160;
+    for (const x of [-0.9, 0.9]) for (const z of [-0.4, 0.4]) {
+      const up = this.bx(0.08, 2.0, 0.08, frame, 0.4, 0.6);
+      up.position.set(x, 1.0, z);
+      g.add(up);
+    }
+    for (let i = 0; i < 3; i++) {
+      const sh = this.bx(1.9, 0.06, 0.9, 0x6b7280, 0.3, 0.6);
+      sh.position.y = 0.4 + i * 0.7;
+      g.add(sh);
+      const cratecolor = [0xb5793c, 0x3f7d4f, 0x2f7fd1][i % 3];
+      const cr = this.bx(0.5, 0.4, 0.5, cratecolor, 0.1, 0.8);
+      cr.position.set(-0.5 + (i % 2) * 0.9, 0.4 + i * 0.7 + 0.23, 0);
+      g.add(cr);
+    }
+    return g;
+  }
+
+  private makeToolwall(): THREE.Group {
+    const g = new THREE.Group();
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.0, 0.12), new THREE.MeshStandardMaterial({ color: 0x394150, roughness: 0.7 }));
+    g.add(panel);
+    const tools = [0xc8d0dc, 0xffcf3f, 0xd14b3a, 0x9aa0aa];
+    for (let i = 0; i < 5; i++) {
+      const t = this.bx(0.08 + Math.random() * 0.1, 0.5 + Math.random() * 0.3, 0.06, tools[i % tools.length], 0.7, 0.3);
+      t.position.set(-1.2 + i * 0.6, 0.1, 0.12);
+      g.add(t);
+    }
+    return g;
+  }
+
+  private makePoster(symbol: boolean): THREE.Mesh {
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.3, 1.3),
+      new THREE.MeshBasicMaterial({ map: posterTexture(symbol), side: THREE.DoubleSide }),
+    );
+    return m;
+  }
+
+  private makePipe(scale: number): THREE.Group {
+    const g = new THREE.Group();
+    const pipe = this.cy(0.12, 0.12, 9 * scale, 0x8a8f99, 10, 0.6, 0.4);
+    pipe.rotation.x = Math.PI / 2;
+    g.add(pipe);
+    return g;
+  }
+
+  private makeCone(): THREE.Group {
+    const g = new THREE.Group();
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.55, 14), this.mat(0xff7a2a, 0.1, 0.7));
+    cone.position.y = 0.28;
+    const base = this.bx(0.42, 0.06, 0.42, 0xff7a2a, 0.1, 0.7);
+    base.position.y = 0.03;
+    const band = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.12, 14), this.mat(0xf5f5f5, 0.1, 0.6));
+    band.position.y = 0.34;
+    g.add(cone, base, band);
+    return g;
+  }
+
+  private makeParkingLines(): THREE.Group {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color: 0xffcf3f, emissive: 0x4a3a00, emissiveIntensity: 0.5, roughness: 0.7 });
+    const w = 3.6;
+    const d = 4.8;
+    const t = 0.14;
+    const mk = (sx: number, sz: number, lx: number, lz: number) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, 0.04, sz), mat);
+      m.position.set(lx, 0.02, lz);
+      g.add(m);
+    };
+    mk(w, t, 0, -d / 2);
+    mk(w, t, 0, d / 2);
+    mk(t, d, -w / 2, 0);
+    mk(t, d, w / 2, 0);
+    return g;
+  }
+
+  private makeVan(color: number): THREE.Group {
+    const g = new THREE.Group();
+    const body = this.bx(2.1, 1.5, 4.2, color, 0.3, 0.5);
+    body.position.y = 1.1;
+    body.castShadow = true;
+    const cab = this.bx(2.0, 0.9, 1.2, color, 0.3, 0.5);
+    cab.position.set(0, 0.85, -1.7);
+    const glass = this.bx(1.85, 0.6, 0.1, 0x0d1622, 0.1, 0.2);
+    glass.position.set(0, 1.05, -2.32);
+    const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.18, 0.4), new THREE.MeshStandardMaterial({ color: 0xffb020, emissive: 0xffa000, emissiveIntensity: 1.2 }));
+    beacon.position.set(0, 1.95, -1.4);
+    g.add(body, cab, glass, beacon);
+    for (const sx of [-1, 1]) for (const sz of [-1.3, 1.3]) {
+      const w = this.cy(0.45, 0.45, 0.3, 0x16181d, 14, 0.3, 0.8);
+      w.rotation.z = Math.PI / 2;
+      w.position.set(sx * 1.05, 0.45, sz);
+      g.add(w);
+    }
+    return g;
+  }
+
+  private makeYardLight(): THREE.Group {
+    const g = new THREE.Group();
+    const post = this.cy(0.1, 0.12, 4.2, 0x3c424d, 8);
+    post.position.y = 2.1;
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.2, 0.4), new THREE.MeshStandardMaterial({ color: 0xfff0c8, emissive: 0xffe6a0, emissiveIntensity: 1.4 }));
+    head.position.set(0, 4.1, 0.2);
+    const lamp = new THREE.PointLight(0xffe6b0, 60, 26, 2);
+    lamp.position.set(0, 4.0, 0.2);
+    g.add(post, head, lamp);
+    return g;
+  }
+
+  private makeSilhouette(color: number): THREE.Mesh {
+    const geo = new THREE.ConeGeometry(26, 16, 7);
+    geo.translate(0, 8, 0); // base on the ground
+    return new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color }));
   }
 
   /** Snapshot the latest sim transforms (call right after each world.step). */

@@ -116,15 +116,15 @@ export class Particles {
     // ambient dust motes drifting in a volume (e.g. light shafts near the door)
     if (dustVolume) {
       this.dustTimer += dt;
-      while (this.dustTimer > 0.05) {
-        this.dustTimer -= 0.05;
+      while (this.dustTimer > 0.16) {
+        this.dustTimer -= 0.16;
         this.emit(
           {
             x: dustVolume.x + (Math.random() - 0.5) * dustVolume.r * 2,
-            y: dustVolume.y + Math.random() * dustVolume.r,
+            y: dustVolume.y + (Math.random() - 0.5) * dustVolume.r,
             z: dustVolume.z + (Math.random() - 0.5) * dustVolume.r * 2,
           },
-          { count: 1, speed: 0.05, spread: 0.15, up: 0.05, gravity: -0.02, size: 7, ttl: 3.5, color: [0.8, 0.82, 0.9] },
+          { count: 1, speed: 0.04, spread: 0.12, up: 0.03, gravity: -0.015, size: 2.4, ttl: 2.6, color: [0.34, 0.36, 0.42] },
         );
       }
     }

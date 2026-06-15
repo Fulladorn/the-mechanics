@@ -51,8 +51,8 @@ export class Post {
       }
 
       const bloom = new BloomEffect({
-        intensity: quality === 'high' ? 0.5 : 0.38,
-        luminanceThreshold: 0.85,
+        intensity: quality === 'high' ? 0.42 : 0.3,
+        luminanceThreshold: 0.9,
         luminanceSmoothing: 0.2,
         mipmapBlur: true,
       });

@@ -5,6 +5,8 @@ import { ITEM_DEFS, makeIntent, type Intent } from '../shared/types';
 import { loadSettings, type Settings } from './settings';
 import { Dispatch } from './voice';
 import { DISPATCH } from '../content/narrative';
+import { Menu } from './ui/menu';
+import { Intro } from './ui/intro';
 import { horizontalSpeed } from '../sim/movement';
 import { GameView } from './render/view';
 import { Input } from './input';
@@ -30,6 +32,8 @@ let forceActive = false; // dev/test: step without pointer lock
 let debugIntent: Intent | null = null;
 let settings: Settings;
 let dispatch: Dispatch;
+let menu: Menu;
+let intro: Intro;
 let prevOnGround = true;
 let stepAccum = 0;
 
@@ -43,11 +47,20 @@ function boot(): void {
     if (l) l.querySelector('.msg')!.textContent = 'WebGL failed to start: ' + (err as Error).message;
     return;
   }
-  input = new Input(app, world.player.yaw);
+  input = new Input(app, settings, world.player.yaw);
   hud = new Hud();
   puzzle = new PuzzleOverlay();
   sfx = new Sfx(settings);
   dispatch = new Dispatch(settings);
+  intro = new Intro();
+  menu = new Menu(settings, input, {
+    onResume: resumeGame,
+    onRestart: () => replay(),
+    apply: applySettings,
+  });
+  input.onUnlock = () => {
+    if (running && !won && !paused && !puzzle.open && !menu.open) openPause();
+  };
 
   if (import.meta.env.DEV) {
     (window as unknown as { __mech: unknown }).__mech = {
@@ -88,17 +101,41 @@ function boot(): void {
   document.getElementById('start')!.classList.remove('hidden');
   (document.getElementById('start-btn') as HTMLButtonElement).onclick = start;
   (document.getElementById('win-btn') as HTMLButtonElement).onclick = replay;
+  const setBtn = document.getElementById('settings-btn');
+  if (setBtn) setBtn.onclick = () => menu.openSettings(true);
 
   requestAnimationFrame(loop);
+}
+
+function applySettings(): void {
+  view.applySettings(settings);
+  sfx.applySettings(settings);
+  input.applyBinds(settings);
+  dispatch.applySettings(settings);
+}
+
+function openPause(): void {
+  paused = true;
+  input.enabled = false;
+  input.clearHeld();
+  document.exitPointerLock();
+  menu.openPause();
+}
+
+function resumeGame(): void {
+  menu.close();
+  paused = false;
+  input.enabled = true;
+  app.requestPointerLock();
 }
 
 function start(): void {
   document.getElementById('start')!.classList.add('hidden');
   sfx.resume();
-  dispatch.say(DISPATCH.intro);
-  app.requestPointerLock();
   running = true;
   last = performance.now();
+  dispatch.say(DISPATCH.intro);
+  intro.play('TRAINING BAY', 'Company Contract · Orientation', () => app.requestPointerLock());
 }
 
 function replay(): void {
@@ -110,11 +147,14 @@ function replay(): void {
   input.pitch = 0;
   hud.buildHotbar();
   hud.buildObjectives();
+  menu.close();
   paused = false;
   won = false;
   acc = 0;
   prevOnGround = true;
   stepAccum = 0;
+  input.enabled = true;
+  input.clearHeld();
   sfx.stopEngine();
   dispatch.stop();
   sfx.resume();
@@ -144,14 +184,21 @@ function openPuzzle(): void {
 function onWin(): void {
   won = true;
   sfx.stopEngine();
-  dispatch.say(DISPATCH.outro);
   document.exitPointerLock();
-  const card = document.getElementById('win')!;
-  const sub = card.querySelector('.sub') as HTMLElement;
-  sub.innerHTML =
-    `Vehicle delivered in <b>${world.elapsed.toFixed(1)}s</b>.<br>` +
-    `Dispatch: “Clean work. Don't worry about that symbol stamped on the crate…”`;
-  card.classList.remove('hidden');
+  dispatch.say(DISPATCH.outro);
+  intro.play(
+    'EXTRACTION',
+    'Training Complete',
+    () => {
+      const card = document.getElementById('win')!;
+      const sub = card.querySelector('.sub') as HTMLElement;
+      sub.innerHTML =
+        `Vehicle delivered in <b>${world.elapsed.toFixed(1)}s</b>.<br>` +
+        `Dispatch: “Clean work. Don't worry about that symbol on the crate…”`;
+      card.classList.remove('hidden');
+    },
+    2200,
+  );
 }
 
 function drainEvents(): void {

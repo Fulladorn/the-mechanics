@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
     <title>The Mechanics — Garage (Training)</title>
     <style>
       :root {
@@ -130,6 +131,42 @@
       }
       .btn:hover { transform: translateY(-1px); }
       .btn:active { transform: translateY(1px); }
+      .btn-ghost { background: rgba(255, 255, 255, 0.08); color: #f4f7fb; }
+      .btn-ghost:hover { background: rgba(255, 255, 255, 0.14); }
+
+      .menu-panel {
+        width: 580px; max-width: 92vw; max-height: 86vh; display: flex; flex-direction: column;
+        background: linear-gradient(160deg, #182030, #0f1622);
+        border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 16px; padding: 24px 28px;
+        pointer-events: auto;
+      }
+      .menu-title { font-size: 26px; letter-spacing: 2px; margin-bottom: 16px; color: var(--accent); text-align: center; }
+      .menu-col { display: flex; flex-direction: column; gap: 10px; }
+      .menu-scroll { overflow-y: auto; padding-right: 8px; }
+      .menu-group {
+        font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent2);
+        margin: 16px 0 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); padding-bottom: 4px;
+      }
+      .menu-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; font-size: 14px; }
+      .menu-ctrl { display: flex; align-items: center; gap: 10px; }
+      .menu-ctrl input[type='range'] { width: 180px; accent-color: var(--accent); }
+      .menu-val { width: 44px; text-align: right; font-variant-numeric: tabular-nums; opacity: 0.8; font-size: 12px; }
+      .menu-toggle {
+        min-width: 56px; padding: 5px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.06); color: #cdd5e0; font-weight: 700; cursor: pointer;
+      }
+      .menu-toggle.on { background: var(--accent2); color: #06251f; border-color: var(--accent2); }
+      .menu-seg { display: flex; gap: 4px; }
+      .menu-seg button {
+        padding: 5px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.06); color: #cdd5e0; cursor: pointer; font-size: 12px;
+      }
+      .menu-seg button.active { background: var(--accent); color: #1a1205; border-color: var(--accent); font-weight: 700; }
+      .menu-key {
+        min-width: 76px; padding: 5px 10px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(255, 255, 255, 0.06); color: #ffcf3f; font-weight: 700; cursor: pointer;
+      }
+      .menu-key:hover { background: rgba(255, 255, 255, 0.12); }
       #win-card .sub { opacity: 0.8; font-size: 15px; margin-bottom: 24px; line-height: 1.5; }
 
       #toast {
@@ -192,6 +229,7 @@
           <span class="k">1–6 / Scroll</span><span>Select toolbelt slot</span>
         </div>
         <button class="btn" id="start-btn">CLOCK IN ▶</button>
+        <button class="btn btn-ghost" id="settings-btn" style="margin-top: 10px">Settings</button>
       </div>
     </div>
 

@@ -1,25 +1,39 @@
 import { makeIntent, type Command, type Intent } from '../shared/types';
+import type { Settings } from './settings';
+import type { Action } from './bindings';
 
-// Translates raw keyboard/mouse into a per-frame Intent plus a queue of discrete
-// Commands (interact/drop/slot). Movement is continuous; actions are edge-triggered.
+// Translates raw keyboard/mouse into a per-frame Intent + a queue of discrete
+// Commands, via a rebindable code->action map driven by Settings. Movement is
+// continuous; actions are edge-triggered.
 export class Input {
-  private keys = new Set<string>();
+  private held = new Set<Action>();
   private commands: Command[] = [];
+  private actionByCode = new Map<string, Action>();
   private slot = 0;
+  private jumpConsumed = false;
   yaw = 0;
   pitch = 0;
-  sensitivity = 0.0022;
   locked = false;
   enabled = true;
+  onUnlock?: () => void;
+  /** When set, the next keydown is captured for rebinding instead of played. */
+  rebindCapture?: (code: string) => void;
 
-  constructor(private el: HTMLElement, startYaw = 0) {
+  constructor(
+    private el: HTMLElement,
+    private settings: Settings,
+    startYaw = 0,
+  ) {
     this.yaw = startYaw;
+    this.applyBinds(settings);
     el.addEventListener('click', () => {
       if (this.enabled && !this.locked) el.requestPointerLock();
     });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', () => {
+      const was = this.locked;
       this.locked = document.pointerLockElement === el;
+      if (was && !this.locked) this.onUnlock?.();
     });
     document.addEventListener('mousemove', this.onMouse);
     addEventListener('keydown', this.onKeyDown);
@@ -27,34 +41,55 @@ export class Input {
     addEventListener('wheel', this.onWheel, { passive: false });
   }
 
+  applyBinds(s: Settings): void {
+    this.settings = s;
+    this.actionByCode.clear();
+    for (const a of Object.keys(s.controls.binds) as Action[]) {
+      const code = s.controls.binds[a];
+      if (code) this.actionByCode.set(code, a);
+    }
+  }
+
   private onMouse = (e: MouseEvent): void => {
     if (!this.locked) return;
-    this.yaw -= e.movementX * this.sensitivity;
-    this.pitch -= e.movementY * this.sensitivity;
+    const sens = this.settings.controls.sensitivity;
+    this.yaw -= e.movementX * sens;
+    this.pitch -= e.movementY * sens * (this.settings.controls.invertY ? -1 : 1);
     const lim = Math.PI / 2 - 0.04;
     this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    if (this.rebindCapture) {
+      e.preventDefault();
+      const cb = this.rebindCapture;
+      this.rebindCapture = undefined;
+      if (e.code !== 'Escape') cb(e.code);
+      return;
+    }
     if (!this.enabled) return;
-    const k = e.code;
-    if (!this.keys.has(k)) {
-      if (k === 'KeyE') this.commands.push({ t: 'interact' });
-      else if (k === 'KeyG') this.commands.push({ t: 'drop' });
-      else if (k.startsWith('Digit')) {
-        const n = parseInt(k.slice(5), 10) - 1;
-        if (n >= 0 && n < 6) {
-          this.slot = n;
-          this.commands.push({ t: 'slot', n });
-        }
+    const a = this.actionByCode.get(e.code);
+    if (!a) return;
+    if (!this.held.has(a)) {
+      if (a === 'interact') this.commands.push({ t: 'interact' });
+      else if (a === 'drop') this.commands.push({ t: 'drop' });
+      else if (a === 'pause') {
+        if (this.locked) document.exitPointerLock();
+        else this.onUnlock?.();
+      } else if (a.startsWith('slot')) {
+        this.slot = parseInt(a.slice(4), 10) - 1;
+        this.commands.push({ t: 'slot', n: this.slot });
       }
     }
-    this.keys.add(k);
-    if (this.locked && (k === 'Space' || k === 'Tab' || k.startsWith('Arrow'))) e.preventDefault();
+    this.held.add(a);
+    if (this.locked && (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')))
+      e.preventDefault();
   };
 
   private onKeyUp = (e: KeyboardEvent): void => {
-    this.keys.delete(e.code);
+    const a = this.actionByCode.get(e.code);
+    if (a) this.held.delete(a);
+    if (a === 'jump') this.jumpConsumed = false;
   };
 
   private onWheel = (e: WheelEvent): void => {
@@ -66,17 +101,27 @@ export class Input {
 
   getIntent(): Intent {
     const it = makeIntent();
-    const k = this.keys;
-    it.fwd = k.has('KeyW') || k.has('ArrowUp');
-    it.back = k.has('KeyS') || k.has('ArrowDown');
-    it.left = k.has('KeyA') || k.has('ArrowLeft');
-    it.right = k.has('KeyD') || k.has('ArrowRight');
-    it.jump = k.has('Space');
-    it.crouch = k.has('ControlLeft') || k.has('ControlRight') || k.has('KeyC');
-    it.sprint = k.has('ShiftLeft') || k.has('ShiftRight');
+    const h = this.held;
+    it.fwd = h.has('fwd');
+    it.back = h.has('back');
+    it.left = h.has('left');
+    it.right = h.has('right');
+    const jumpHeld = h.has('jump');
+    if (this.settings.accessibility.autohop) {
+      it.jump = jumpHeld;
+    } else {
+      it.jump = jumpHeld && !this.jumpConsumed;
+      if (jumpHeld) this.jumpConsumed = true;
+    }
+    it.crouch = h.has('crouch');
+    it.sprint = h.has('sprint');
     it.yaw = this.yaw;
     it.pitch = this.pitch;
     return it;
+  }
+
+  clearHeld(): void {
+    this.held.clear();
   }
 
   drainCommands(): Command[] {

@@ -19,12 +19,23 @@ Reliable Delivery Service**.
 
 ## Status
 
-🟢 **Playable: the Garage (training level).** A single-player vertical slice is
-up and running — first-person movement with **bunny-hopping**, look-to-interact
-**pickup + toolbelt**, a **wire-match repair puzzle**, **carry-and-install** an
-engine, and **driving a go-kart** through a checkpoint loop, all tied together
-with tutorial objectives and a "clock out" finish. Co-op netcode and the three
-real missions come next, per the roadmap.
+🟢 **v1.0 — the Garage (training level) is complete & presentable** (single-player).
+A polished, lived-in workshop that opens onto a real exterior yard (parked vans,
+trees, drifting clouds, birds, distant hills) with animated life inside — a
+welding robot throwing sparks, spinning fans, swaying lamps. The full core loop:
+
+- First-person movement with skill-based **bunny-hopping** (auto-hop assist),
+  view-bobbing **hands**, FOV-kick + screenshake juice.
+- Look-to-interact **pickup + toolbelt**, **carry-and-install** an engine.
+- **Three repair puzzle types** — wire-match, bolt-torque, lights-out — plus a
+  hidden **lore crate** that seeds the mystery.
+- **Drive a go-kart** through a checkpoint loop; **run timer + best time**.
+- **Dispatch** narration (browser TTS) + subtitles; procedural ambient + music + SFX.
+- Post-processing (bloom/AO/SMAA), **pause menu + full settings** (video/audio/
+  controls with **key rebinding**/accessibility), in-engine intro & outro.
+
+Co-op netcode and the three real missions (Mountains, Ocean, Moon) come next,
+per the roadmap.
 
 - [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md) — the complete game design document (what we're building)
 - [`docs/TECH_ARCHITECTURE.md`](docs/TECH_ARCHITECTURE.md) — the engineering plan (how we build it)

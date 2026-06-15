@@ -21,6 +21,8 @@ import type { Box } from './collision';
 import { horizontalSpeed, stepMovement, type Mover } from './movement';
 import { makeKart, stepKart, type KartState } from './kart';
 import { makeWirePuzzle, type WirePuzzle } from './puzzles/wireMatch';
+import { makeBoltTorque, type BoltPuzzle } from './puzzles/boltTorque';
+import { makeFuseGrid, type FusePuzzle } from './puzzles/fuseGrid';
 import { Objectives } from './objectives';
 import { makeGarage, type GarageLevel } from '../content/levels/garage';
 
@@ -39,7 +41,11 @@ export class World {
   items: WorldItem[];
   kart: KartState;
   puzzle: WirePuzzle;
+  bolt: BoltPuzzle;
+  lorePuzzle: FusePuzzle;
   puzzleSolved = false;
+  boltSolved = false;
+  loreFound = false;
   gateOpen = false;
   cpIndex = 0;
   objectives = new Objectives();
@@ -72,6 +78,8 @@ export class World {
     ];
     this.kart = makeKart(level.kartStart, level.kartYaw);
     this.puzzle = makeWirePuzzle(level.puzzleSeed, 4);
+    this.bolt = makeBoltTorque(level.puzzleSeed + 1, 4);
+    this.lorePuzzle = makeFuseGrid(level.puzzleSeed + 2, 3);
   }
 
   eyePos(): Vec3 {
@@ -155,7 +163,20 @@ export class World {
         if (!this.puzzleSolved) {
           this.puzzleSolved = true;
           this.objectives.complete('puzzle', this.events);
-          this.events.push({ t: 'install' }, { t: 'sfx', name: 'success' });
+          this.events.push({ t: 'sfx', name: 'success' });
+        }
+        break;
+      case 'solveBolt':
+        if (!this.boltSolved) {
+          this.boltSolved = true;
+          this.objectives.complete('bolt', this.events);
+          this.events.push({ t: 'install' }, { t: 'sfx', name: 'install' });
+        }
+        break;
+      case 'solveLore':
+        if (!this.loreFound) {
+          this.loreFound = true;
+          this.events.push({ t: 'lore' }, { t: 'sfx', name: 'success' });
         }
         break;
       case 'interact':
@@ -189,7 +210,13 @@ export class World {
         });
       }
       if (!this.puzzleSolved) {
-        candidates.push({ kind: 'openPuzzle', label: 'Repair fuse panel', pos: { ...this.level.benchPos } });
+        candidates.push({ kind: 'openPuzzle', label: 'Repair fuse panel', pos: { ...this.level.fusePos } });
+      }
+      if (!this.boltSolved) {
+        candidates.push({ kind: 'openBolt', label: 'Torque engine-mount bolts', pos: { ...this.level.boltPos } });
+      }
+      if (!this.loreFound) {
+        candidates.push({ kind: 'openLore', label: 'Inspect the sealed crate', pos: { ...this.level.lorePos } });
       }
       if (this.kart.engineInstalled && !this.kart.occupied) {
         candidates.push({ kind: 'enterKart', label: 'Drive go-kart', pos: { ...this.kart.pos } });
@@ -243,6 +270,12 @@ export class World {
         break;
       case 'openPuzzle':
         this.events.push({ t: 'openPuzzle' });
+        break;
+      case 'openBolt':
+        this.events.push({ t: 'openBolt' });
+        break;
+      case 'openLore':
+        this.events.push({ t: 'openLore' });
         break;
       case 'enterKart':
         if (p.mode === 'kart') {

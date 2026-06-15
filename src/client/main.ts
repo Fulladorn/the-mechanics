@@ -2,12 +2,20 @@
 import { World } from '../sim/world';
 import { DT } from '../shared/constants';
 import { ITEM_DEFS, makeIntent, type Intent } from '../shared/types';
+import { loadSettings, type Settings } from './settings';
+import { Dispatch } from './voice';
+import { DISPATCH } from '../content/narrative';
+import { Menu } from './ui/menu';
+import { Intro } from './ui/intro';
 import { horizontalSpeed } from '../sim/movement';
 import { GameView } from './render/view';
 import { Input } from './input';
 import { Hud } from './ui/hud';
 import { PuzzleOverlay } from './ui/puzzle';
+import { BoltOverlay } from './ui/boltTorque';
+import { FuseOverlay } from './ui/fuseGrid';
 import { Sfx } from './audio';
+import { formatTime, recordBest } from '../shared/timer';
 
 const app = document.getElementById('app')!;
 
@@ -16,6 +24,8 @@ let view: GameView;
 let input: Input;
 let hud: Hud;
 let puzzle: PuzzleOverlay;
+let bolt: BoltOverlay;
+let fuse: FuseOverlay;
 let sfx: Sfx;
 
 let running = false;
@@ -25,31 +35,75 @@ let acc = 0;
 let last = 0;
 let forceActive = false; // dev/test: step without pointer lock
 let debugIntent: Intent | null = null;
+let settings: Settings;
+let dispatch: Dispatch;
+let menu: Menu;
+let intro: Intro;
+let prevOnGround = true;
+let stepAccum = 0;
 
 function boot(): void {
+  settings = loadSettings();
   try {
     world = new World();
-    view = new GameView(world, app);
+    view = new GameView(world, app, settings);
   } catch (err) {
     const l = document.getElementById('loading');
     if (l) l.querySelector('.msg')!.textContent = 'WebGL failed to start: ' + (err as Error).message;
     return;
   }
-  input = new Input(app, world.player.yaw);
+  input = new Input(app, settings, world.player.yaw);
   hud = new Hud();
   puzzle = new PuzzleOverlay();
-  sfx = new Sfx();
+  bolt = new BoltOverlay();
+  fuse = new FuseOverlay();
+  sfx = new Sfx(settings);
+  dispatch = new Dispatch(settings);
+  intro = new Intro();
+  menu = new Menu(settings, input, {
+    onResume: resumeGame,
+    onRestart: () => replay(),
+    apply: applySettings,
+  });
+  input.onUnlock = () => {
+    if (running && !won && !paused && !puzzle.open && !menu.open) openPause();
+  };
 
   if (import.meta.env.DEV) {
     (window as unknown as { __mech: unknown }).__mech = {
       unlock: () => {
         forceActive = true;
       },
+      openGate: () => {
+        world.gateOpen = true;
+      },
+      pause: () => openPause(),
+      openSettings: () => menu.openSettings(true),
+      openBolt: () => openBolt(),
+      openLore: () => openLore(),
       drive: (p: Partial<Intent>) => {
         const it = makeIntent();
         Object.assign(it, p);
         if (p.yaw !== undefined) input.yaw = p.yaw;
         debugIntent = it;
+      },
+      look: (yaw: number, pitch = 0) => {
+        input.yaw = yaw;
+        input.pitch = pitch;
+      },
+      stop: () => {
+        debugIntent = makeIntent();
+      },
+      teleport: (x: number, z: number, yaw = 0, pitch = 0) => {
+        const p = world.player;
+        p.mode = 'foot';
+        p.pos.x = x;
+        p.pos.z = z;
+        p.pos.y = 0;
+        p.vel.x = p.vel.y = p.vel.z = 0;
+        input.yaw = yaw;
+        input.pitch = pitch;
+        debugIntent = makeIntent();
       },
     };
   }
@@ -58,63 +112,128 @@ function boot(): void {
   document.getElementById('start')!.classList.remove('hidden');
   (document.getElementById('start-btn') as HTMLButtonElement).onclick = start;
   (document.getElementById('win-btn') as HTMLButtonElement).onclick = replay;
+  const setBtn = document.getElementById('settings-btn');
+  if (setBtn) setBtn.onclick = () => menu.openSettings(true);
 
   requestAnimationFrame(loop);
+}
+
+function applySettings(): void {
+  view.applySettings(settings);
+  sfx.applySettings(settings);
+  input.applyBinds(settings);
+  dispatch.applySettings(settings);
+}
+
+function openPause(): void {
+  paused = true;
+  input.enabled = false;
+  input.clearHeld();
+  document.exitPointerLock();
+  menu.openPause();
+}
+
+function resumeGame(): void {
+  menu.close();
+  paused = false;
+  input.enabled = true;
+  app.requestPointerLock();
 }
 
 function start(): void {
   document.getElementById('start')!.classList.add('hidden');
   sfx.resume();
-  app.requestPointerLock();
   running = true;
   last = performance.now();
+  dispatch.say(DISPATCH.intro);
+  intro.play('TRAINING BAY', 'Company Contract · Orientation', () => app.requestPointerLock());
 }
 
 function replay(): void {
   document.getElementById('win')!.classList.add('hidden');
   app.innerHTML = '';
   world = new World();
-  view = new GameView(world, app);
+  view = new GameView(world, app, settings);
   input.yaw = world.player.yaw;
   input.pitch = 0;
   hud.buildHotbar();
   hud.buildObjectives();
+  menu.close();
   paused = false;
   won = false;
   acc = 0;
+  prevOnGround = true;
+  stepAccum = 0;
+  input.enabled = true;
+  input.clearHeld();
+  sfx.stopEngine();
+  dispatch.stop();
   sfx.resume();
   app.requestPointerLock();
   running = true;
   last = performance.now();
 }
 
-function openPuzzle(): void {
+function pauseForStation(): () => void {
   paused = true;
+  input.enabled = false;
+  input.clearHeld();
   document.exitPointerLock();
-  puzzle.show(
-    world.puzzle,
-    () => {
-      world.command({ t: 'solvePuzzle' });
-      drainEvents();
-      paused = false;
-      app.requestPointerLock();
-    },
-    () => {
-      paused = false;
-      app.requestPointerLock();
-    },
-  );
+  return () => {
+    paused = false;
+    input.enabled = true;
+    app.requestPointerLock();
+  };
+}
+
+function openPuzzle(): void {
+  const resume = pauseForStation();
+  puzzle.show(world.puzzle, () => {
+    world.command({ t: 'solvePuzzle' });
+    drainEvents();
+    resume();
+  }, resume);
+}
+
+function openBolt(): void {
+  const resume = pauseForStation();
+  bolt.show(world.bolt, () => {
+    world.command({ t: 'solveBolt' });
+    drainEvents();
+    resume();
+  }, resume);
+}
+
+function openLore(): void {
+  const resume = pauseForStation();
+  fuse.show(world.lorePuzzle, () => {
+    world.command({ t: 'solveLore' });
+    drainEvents();
+    resume();
+  }, resume);
 }
 
 function onWin(): void {
   won = true;
+  sfx.stopEngine();
   document.exitPointerLock();
-  const card = document.getElementById('win')!;
-  const sub = card.querySelector('.sub') as HTMLElement;
-  sub.innerHTML =
-    `Vehicle delivered in <b>${world.elapsed.toFixed(1)}s</b>.<br>` +
-    `Dispatch: “Clean work. Don't worry about that symbol stamped on the crate…”`;
-  card.classList.remove('hidden');
+  dispatch.say(DISPATCH.outro);
+  intro.play(
+    'EXTRACTION',
+    'Training Complete',
+    () => {
+      const res = recordBest('garage', world.elapsed);
+      const card = document.getElementById('win')!;
+      const sub = card.querySelector('.sub') as HTMLElement;
+      sub.innerHTML =
+        `Delivered in <b>${formatTime(world.elapsed)}</b> · Best <b>${formatTime(res.best)}</b>` +
+        `${res.isNew ? ' <span style="color:#ffcf3f">NEW!</span>' : ''}` +
+        `${world.loreFound ? '<br><span style="color:#5fd9c8">Recovered log secured.</span>' : ''}<br>` +
+        `Dispatch: “Clean work. Don't worry about that symbol on the crate…”`;
+      card.classList.remove('hidden');
+    },
+    2200,
+  );
 }
 
 function drainEvents(): void {
@@ -125,21 +244,42 @@ function drainEvents(): void {
         break;
       case 'pickup':
         hud.toast(`Picked up ${ITEM_DEFS[e.kind].label}`);
+        view.pickupFx();
         break;
       case 'gateOpen':
         hud.toast('⚡ Speed gate online!');
+        view.gateFx();
         break;
       case 'checkpoint':
         hud.toast(`Checkpoint ${e.index}/${e.total}`);
+        view.checkpointFx();
         break;
       case 'objectiveDone':
         hud.toast('Objective complete ✓');
+        dispatch.say(DISPATCH.objectives[e.id as keyof typeof DISPATCH.objectives] ?? '');
+        break;
+      case 'enterKart':
+        sfx.startEngine();
+        break;
+      case 'exitKart':
+        sfx.stopEngine();
         break;
       case 'install':
         hud.toast('Engine installed!');
+        view.installFx();
         break;
       case 'openPuzzle':
         openPuzzle();
+        break;
+      case 'openBolt':
+        openBolt();
+        break;
+      case 'openLore':
+        openLore();
+        break;
+      case 'lore':
+        hud.toast('📂 Recovered log found');
+        dispatch.say(DISPATCH.lore);
         break;
       case 'win':
         onWin();
@@ -168,17 +308,39 @@ function loop(now: number): void {
     }
     for (const c of input.drainCommands()) world.command(c);
     drainEvents();
+
+    // client-derived audio cues (sim stays untouched)
+    const pl = world.player;
+    if (pl.mode === 'foot') {
+      if (!prevOnGround && pl.onGround) sfx.play('land');
+      else if (prevOnGround && !pl.onGround) sfx.play('jump');
+      if (pl.onGround) {
+        const sp = Math.hypot(pl.vel.x, pl.vel.z);
+        if (sp > 2.5) {
+          stepAccum += sp * dt;
+          if (stepAccum > 2.2) {
+            sfx.play('footstep');
+            stepAccum = 0;
+          }
+        }
+      }
+      prevOnGround = pl.onGround;
+    } else {
+      sfx.updateEngine(world.kart.speed);
+      prevOnGround = true;
+    }
   } else {
     input.drainCommands(); // discard while frozen
   }
 
   const alpha = active ? acc / DT : 1;
-  view.frame(alpha, input.yaw, input.pitch);
+  view.frame(dt, alpha, input.yaw, input.pitch);
 
   if (view) {
     const sp =
       world.player.mode === 'kart' ? Math.abs(world.kart.speed) : horizontalSpeed(world.player.vel);
     hud.setSpeed(sp);
+    hud.setTimer(formatTime(world.elapsed), running && !won);
     hud.setPrompt(running && !paused && !won ? (world.findInteract()?.label ?? null) : null);
     hud.updateHotbar(world.player.hotbar, world.player.selSlot, world.player.carrying);
     hud.updateObjectives(world.objectives.list, world.objectives.activeIndex());

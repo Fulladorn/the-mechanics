@@ -6,9 +6,7 @@ import puppeteer from 'puppeteer';
 
 mkdirSync('screenshots', { recursive: true });
 
-const server = spawn('npx', ['vite', '--port', '4173', '--strictPort'], {
-  stdio: 'ignore',
-});
+const server = spawn('npx', ['vite', '--port', '4173', '--strictPort'], { stdio: 'ignore' });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 await wait(6000);
 
@@ -33,29 +31,52 @@ try {
   page.on('pageerror', (e) => errors.push('PAGEERROR: ' + e.message));
 
   await page.goto('http://localhost:4173/', { waitUntil: 'load', timeout: 20000 });
-  await wait(1500);
+  await wait(1200);
   await page.screenshot({ path: 'screenshots/01-start.png' });
 
   await page.click('#start-btn').catch(() => {});
-  await wait(2500);
-  await page.screenshot({ path: 'screenshots/02-garage.png' });
+  await wait(800);
+  await page.evaluate(() => window.__mech?.unlock());
+  await wait(400);
 
-  // Drive the sim directly to prove gameplay renders (headless can't pointer-lock):
-  // step the shared World through a short bunny-hop so the gate opens, then shoot.
-  await page.evaluate(async () => {
-    // @ts-ignore — test hook exposed by main.ts
-    const dbg = window.__mech;
-    if (!dbg) return;
-    dbg.unlock(); // force-enable stepping without pointer lock
-    let yaw = 0;
-    for (let i = 0; i < 320; i++) {
-      yaw += 0.03;
-      dbg.drive({ jump: true, sprint: true, right: true, yaw });
-      await new Promise((r) => requestAnimationFrame(r));
-    }
-  });
-  await wait(500);
-  await page.screenshot({ path: 'screenshots/03-moving.png' });
+  // helper to pose the camera deterministically then settle a few frames
+  const shot = async (name, x, z, yaw, pitch) => {
+    await page.evaluate(
+      (x, z, yaw, pitch) => window.__mech?.teleport(x, z, yaw, pitch),
+      x,
+      z,
+      yaw,
+      pitch,
+    );
+    await wait(400);
+    await page.screenshot({ path: `screenshots/${name}.png` });
+  };
+
+  await page.evaluate(() => window.__mech?.openGate());
+  await shot('02-spawn', 0, 15, 0, 0); // runway → gate
+  await shot('03-exterior', 0, 16, Math.PI, -0.04); // back toward the open door + yard
+  await shot('04-workshop', 0, -10.5, 0, -0.02); // kart bay + benches + hoist + terminal
+  await shot('05-corner', -14, -15, Math.PI / 4, 0); // shelves/tires/barrels corner
+
+  // repair puzzles
+  await page.evaluate(() => window.__mech?.openBolt());
+  await wait(400);
+  await page.screenshot({ path: 'screenshots/06-bolt.png' });
+  await page.keyboard.press('Escape');
+  await wait(300);
+  await page.evaluate(() => window.__mech?.openLore());
+  await wait(400);
+  await page.screenshot({ path: 'screenshots/07-lore.png' });
+  await page.keyboard.press('Escape');
+  await wait(300);
+
+  // UI: pause menu + settings panel
+  await page.evaluate(() => window.__mech?.pause());
+  await wait(400);
+  await page.screenshot({ path: 'screenshots/08-pause.png' });
+  await page.evaluate(() => window.__mech?.openSettings());
+  await wait(400);
+  await page.screenshot({ path: 'screenshots/09-settings.png' });
 
   console.log('CONSOLE/PAGE ERRORS:', errors.length ? errors : 'none');
 } catch (e) {

@@ -65,3 +65,149 @@ export function chevronTexture(): THREE.Texture {
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
+
+const srgb = (c: HTMLCanvasElement, repeat = true): THREE.Texture => {
+  const t = new THREE.CanvasTexture(c);
+  if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+};
+
+/** Corrugated/painted industrial wall panelling with vertical ribs + grime. */
+export function wallPanelTexture(): THREE.Texture {
+  const { c, ctx } = makeCanvas(256);
+  ctx.fillStyle = '#5a6680';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let x = 0; x < 256; x += 32) {
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(x, 0, 4, 256);
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(x + 28, 0, 4, 256);
+  }
+  // bolt rows + grime
+  for (let y = 16; y < 256; y += 64) {
+    for (let x = 16; x < 256; x += 32) {
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.beginPath();
+      ctx.arc(x, y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  for (let i = 0; i < 400; i++) {
+    ctx.fillStyle = `rgba(20,24,32,${Math.random() * 0.08})`;
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 6, 2);
+  }
+  return srgb(c);
+}
+
+/** Horizontal-panelled roll-up garage door. */
+export function doorTexture(): THREE.Texture {
+  const { c, ctx } = makeCanvas(256);
+  ctx.fillStyle = '#c44a3f';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let y = 0; y < 256; y += 40) {
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.fillRect(0, y, 256, 5);
+    ctx.fillStyle = 'rgba(255,255,255,0.10)';
+    ctx.fillRect(0, y + 6, 256, 6);
+  }
+  return srgb(c);
+}
+
+/** Generic brushed/painted metal, tinted to `base` (hex like '#8a8f99'). */
+export function metalTexture(base = '#8a8f99'): THREE.Texture {
+  const { c, ctx } = makeCanvas(128);
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 900; i++) {
+    const v = Math.random() * 0.12;
+    ctx.fillStyle = `rgba(255,255,255,${v})`;
+    ctx.fillRect(Math.random() * 128, Math.random() * 128, 8, 1);
+    ctx.fillStyle = `rgba(0,0,0,${v})`;
+    ctx.fillRect(Math.random() * 128, Math.random() * 128, 6, 1);
+  }
+  return srgb(c);
+}
+
+/** Rubber tire with tread blocks on the sidewall band. */
+export function tireTexture(): THREE.Texture {
+  const { c, ctx } = makeCanvas(128);
+  ctx.fillStyle = '#16181d';
+  ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = '#26282f';
+  for (let x = 0; x < 128; x += 12) ctx.fillRect(x, 0, 7, 128);
+  ctx.fillStyle = 'rgba(255,255,255,0.05)';
+  ctx.fillRect(0, 54, 128, 20);
+  return srgb(c);
+}
+
+/** A wall poster. When `symbol`, it carries the recurring mystery glyph. */
+export function posterTexture(symbol = false): THREE.Texture {
+  const { c, ctx } = makeCanvas(256);
+  ctx.fillStyle = symbol ? '#0e1320' : '#f3ead2';
+  ctx.fillRect(0, 0, 256, 256);
+  ctx.strokeStyle = symbol ? '#37506b' : '#b23b2e';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(10, 10, 236, 236);
+  if (symbol) {
+    // a stylized rune: ringed triangle with a dot — the "Entity" mark
+    ctx.strokeStyle = '#5fd9c8';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(128, 132, 70, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(128, 70);
+    ctx.lineTo(190, 178);
+    ctx.lineTo(66, 178);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fillStyle = '#5fd9c8';
+    ctx.beginPath();
+    ctx.arc(128, 142, 9, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = '#b23b2e';
+    ctx.font = 'bold 38px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('SAFETY', 128, 96);
+    ctx.fillText('FIRST', 128, 140);
+    ctx.fillStyle = '#3a3a3a';
+    ctx.font = '18px sans-serif';
+    ctx.fillText('THE COMPANY', 128, 200);
+  }
+  return srgb(c, false);
+}
+
+/** Vertical sky gradient for the exterior dome (maps by elevation on a sphere). */
+export function skyTexture(top = '#2a4a86', horizon = '#cfa86b'): THREE.Texture {
+  const c = document.createElement('canvas');
+  c.width = 8;
+  c.height = 256;
+  const ctx = c.getContext('2d')!;
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, top);
+  g.addColorStop(0.55, '#3f4a63');
+  g.addColorStop(0.84, horizon);
+  g.addColorStop(1, '#7a7f92');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 8, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Soft radial sprite used by the particle system. */
+export function sparkTexture(): THREE.Texture {
+  const { c, ctx } = makeCanvas(64);
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.4, 'rgba(255,240,200,0.7)');
+  g.addColorStop(1, 'rgba(255,200,120,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}

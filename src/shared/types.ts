@@ -52,7 +52,9 @@ export type Command =
   | { t: 'interact' }
   | { t: 'drop' }
   | { t: 'slot'; n: number }
-  | { t: 'solvePuzzle' };
+  | { t: 'solvePuzzle' }
+  | { t: 'solveBolt' }
+  | { t: 'solveLore' };
 
 /** Things the sim emits each step for the client to turn into FX/SFX/UI. */
 export type SimEvent =
@@ -64,12 +66,15 @@ export type SimEvent =
   | { t: 'exitKart' }
   | { t: 'checkpoint'; index: number; total: number }
   | { t: 'openPuzzle' }
+  | { t: 'openBolt' }
+  | { t: 'openLore' }
+  | { t: 'lore' }
   | { t: 'objectiveDone'; id: string }
   | { t: 'win' }
   | { t: 'sfx'; name: 'pickup' | 'install' | 'success' | 'gate' | 'enter' | 'win' };
 
 export interface InteractTarget {
-  kind: 'pickup' | 'openPuzzle' | 'install' | 'enterKart' | 'clockIn';
+  kind: 'pickup' | 'openPuzzle' | 'openBolt' | 'openLore' | 'install' | 'enterKart' | 'clockIn';
   label: string;
   pos: Vec3;
 }

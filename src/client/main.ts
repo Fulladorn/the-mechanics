@@ -11,11 +11,10 @@ import { horizontalSpeed } from '../sim/movement';
 import { GameView } from './render/view';
 import { Input } from './input';
 import { Hud } from './ui/hud';
-import { PuzzleOverlay } from './ui/puzzle';
-import { BoltOverlay } from './ui/boltTorque';
 import { FuseOverlay } from './ui/fuseGrid';
 import { Sfx } from './audio';
 import { formatTime, recordBest } from '../shared/timer';
+import { deriveStats, installPart, variantById } from '../sim/vehicle';
 
 const app = document.getElementById('app')!;
 
@@ -23,8 +22,6 @@ let world: World;
 let view: GameView;
 let input: Input;
 let hud: Hud;
-let puzzle: PuzzleOverlay;
-let bolt: BoltOverlay;
 let fuse: FuseOverlay;
 let sfx: Sfx;
 
@@ -54,8 +51,6 @@ function boot(): void {
   }
   input = new Input(app, settings, world.player.yaw);
   hud = new Hud();
-  puzzle = new PuzzleOverlay();
-  bolt = new BoltOverlay();
   fuse = new FuseOverlay();
   sfx = new Sfx(settings);
   dispatch = new Dispatch(settings);
@@ -66,7 +61,7 @@ function boot(): void {
     apply: applySettings,
   });
   input.onUnlock = () => {
-    if (running && !won && !paused && !puzzle.open && !menu.open) openPause();
+    if (running && !won && !paused && !fuse.open && !menu.open) openPause();
   };
 
   if (import.meta.env.DEV) {
@@ -79,8 +74,27 @@ function boot(): void {
       },
       pause: () => openPause(),
       openSettings: () => menu.openSettings(true),
-      openBolt: () => openBolt(),
       openLore: () => openLore(),
+      buildCar: () => {
+        const v = world.vehicle;
+        const set = (id: string, vid: string) => installPart(v, id, vid);
+        set('wheelFL', 'wheel.slick');
+        set('wheelFR', 'wheel.slick');
+        set('wheelRL', 'wheel.slick');
+        set('wheelRR', 'wheel.slick');
+        set('engine', 'engine.v8');
+        set('seat', 'seat.racing');
+        set('body', 'body.light');
+        set('bumper', 'bumper.bull');
+        set('headlights', 'headlights.std');
+        set('spoiler', 'spoiler.gt');
+        set('exhaust', 'exhaust.sport');
+        set('battery', 'battery.hd');
+        v.bodyColor = 0x2f7fd1;
+        if (!world.objectives.isDone('assemble')) world.objectives.complete('assemble', world.events);
+        drainEvents();
+      },
+      setVariant: (socketId: string, variantId: string) => installPart(world.vehicle, socketId, variantId),
       drive: (p: Partial<Intent>) => {
         const it = makeIntent();
         Object.assign(it, p);
@@ -186,24 +200,6 @@ function pauseForStation(): () => void {
   };
 }
 
-function openPuzzle(): void {
-  const resume = pauseForStation();
-  puzzle.show(world.puzzle, () => {
-    world.command({ t: 'solvePuzzle' });
-    drainEvents();
-    resume();
-  }, resume);
-}
-
-function openBolt(): void {
-  const resume = pauseForStation();
-  bolt.show(world.bolt, () => {
-    world.command({ t: 'solveBolt' });
-    drainEvents();
-    resume();
-  }, resume);
-}
-
 function openLore(): void {
   const resume = pauseForStation();
   fuse.show(world.lorePuzzle, () => {
@@ -264,15 +260,18 @@ function drainEvents(): void {
       case 'exitKart':
         sfx.stopEngine();
         break;
-      case 'install':
-        hud.toast('Engine installed!');
+      case 'installPart': {
+        const v = variantById(e.variantId);
+        hud.toast(`${v ? v.name : ITEM_DEFS[e.kind].label} installed`);
         view.installFx();
         break;
-      case 'openPuzzle':
-        openPuzzle();
+      }
+      case 'paint':
+        hud.toast('Repainted the body');
         break;
-      case 'openBolt':
-        openBolt();
+      case 'vehicleDrivable':
+        hud.toast('🚗 Build complete — hop in!');
+        view.gateFx();
         break;
       case 'openLore':
         openLore();
@@ -341,6 +340,7 @@ function loop(now: number): void {
       world.player.mode === 'kart' ? Math.abs(world.kart.speed) : horizontalSpeed(world.player.vel);
     hud.setSpeed(sp);
     hud.setTimer(formatTime(world.elapsed), running && !won);
+    hud.updateSpec(world.vehicle, deriveStats(world.vehicle));
     hud.setPrompt(running && !paused && !won ? (world.findInteract()?.label ?? null) : null);
     hud.updateHotbar(world.player.hotbar, world.player.selSlot, world.player.carrying);
     hud.updateObjectives(world.objectives.list, world.objectives.activeIndex());

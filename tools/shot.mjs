@@ -55,15 +55,15 @@ try {
   await page.evaluate(() => window.__mech?.openGate());
   await shot('02-spawn', 0, 15, 0, 0); // runway → gate
   await shot('03-exterior', 0, 16, Math.PI, -0.04); // back toward the open door + yard
-  await shot('04-workshop', 0, -10.5, 0, -0.02); // kart bay + benches + hoist + terminal
-  await shot('05-corner', -14, -15, Math.PI / 4, 0); // shelves/tires/barrels corner
+  await shot('04-workshop', 0, -10.5, 0, -0.02); // chassis bay + benches + hoist + terminal
 
-  // repair puzzles
-  await page.evaluate(() => window.__mech?.openBolt());
-  await wait(400);
-  await page.screenshot({ path: 'screenshots/06-bolt.png' });
-  await page.keyboard.press('Escape');
-  await wait(300);
+  // build the car, then frame the finished, customized build
+  await page.evaluate(() => window.__mech?.buildCar());
+  await wait(500);
+  await shot('05-build', 4.5, -3, 0.95, -0.05); // rear 3/4 of the assembled build + spec sheet
+  await shot('06-build-front', 2.2, -11, Math.PI * 0.92, -0.04); // front 3/4 of the build
+
+  // optional hidden lore crate (lights-out)
   await page.evaluate(() => window.__mech?.openLore());
   await wait(400);
   await page.screenshot({ path: 'screenshots/07-lore.png' });

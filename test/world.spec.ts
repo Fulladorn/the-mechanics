@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/sim/world';
+import { isDrivable } from '../src/sim/vehicle';
 import { makeIntent } from '../src/shared/types';
 import { CHECKPOINT_RADIUS, DT } from '../src/shared/constants';
 import type { Vec3 } from '../src/shared/math';
@@ -82,30 +83,25 @@ describe('garage full playthrough (headless)', () => {
     expect(w.player.hotbar).toContain('wrench');
     expect(w.objectives.isDone('pickup')).toBe(true);
 
-    // 4. repair the fuse panel (walk to bench, open it, solve via the UI command)
+    // 4. build the car: carry every required part to the chassis and bolt it on
     walkTo(w, { x: 0, y: 0, z: 4 }); // approach the gate gap from the south
     walkTo(w, { x: 0, y: 0, z: -4 }); // through to the north workshop
-    walkTo(w, lvl.fusePos);
-    interactWith(w, lvl.fusePos);
-    w.command({ t: 'solvePuzzle' });
-    expect(w.objectives.isDone('puzzle')).toBe(true);
+    const origin = lvl.kartStart;
+    for (const s of w.vehicle.sockets.filter((x) => x.required)) {
+      const item = w.items.find((i) => i.kind === s.accepts && !i.picked);
+      expect(item).toBeTruthy();
+      walkTo(w, item!.pos);
+      interactWith(w, item!.pos);
+      expect(w.player.carrying).toBe(s.accepts);
+      const socketPos = { x: origin.x + s.anchor.x, y: s.anchor.y, z: origin.z + s.anchor.z };
+      walkTo(w, socketPos, 1.3);
+      interactWith(w, socketPos);
+      expect(w.player.carrying).toBeNull(); // installed
+    }
+    expect(isDrivable(w.vehicle)).toBe(true);
+    expect(w.objectives.isDone('assemble')).toBe(true);
 
-    // 4b. torque the engine-mount bolts
-    walkTo(w, lvl.boltPos);
-    interactWith(w, lvl.boltPos);
-    w.command({ t: 'solveBolt' });
-    expect(w.objectives.isDone('bolt')).toBe(true);
-
-    // 5. carry the engine block to the kart and install it
-    walkTo(w, lvl.enginePos);
-    interactWith(w, lvl.enginePos);
-    expect(w.player.carrying).toBe('engine');
-    walkTo(w, lvl.kartStart);
-    interactWith(w, lvl.kartStart);
-    expect(w.kart.engineInstalled).toBe(true);
-    expect(w.objectives.isDone('carry')).toBe(true);
-
-    // 6. enter the kart and drive every checkpoint
+    // 5. enter the vehicle and drive every checkpoint
     interactWith(w, lvl.kartStart);
     expect(w.player.mode).toBe('kart');
     for (const cp of lvl.checkpoints) {

@@ -1,5 +1,12 @@
 import type { Vec3 } from '../../shared/math';
 import { box, slab, type Box } from '../../sim/collision';
+import type { PartKind } from '../../sim/vehicle';
+
+export interface PartSpawn {
+  part: PartKind;
+  variantId: string;
+  pos: Vec3;
+}
 
 // Tags let the renderer pick materials/procedural textures per structure.
 export type SolidTag =
@@ -61,7 +68,9 @@ export type PropKind =
   | 'cloud'
   | 'bird'
   | 'grass'
-  | 'roadline';
+  | 'roadline'
+  | 'lift'
+  | 'paintStation';
 
 export interface Prop {
   kind: PropKind;
@@ -91,10 +100,8 @@ export interface GarageLevel {
   spawnYaw: number;
   wrenchPos: Vec3;
   flashlightPos: Vec3;
-  enginePos: Vec3;
-  benchPos: Vec3;
-  boltPos: Vec3;
-  fusePos: Vec3;
+  partSpawns: PartSpawn[];
+  paintPos: Vec3;
   lorePos: Vec3;
   kartStart: Vec3;
   kartYaw: number;
@@ -265,6 +272,35 @@ export function makeGarage(): GarageLevel {
   P('silhouette', 30, 0, 178, 0, 2.9, 0x283047);
   P('silhouette', 95, 0, 150, 0, 2.0, 0x2c3550);
 
+  // --- build bay: hydraulic lift under the chassis + a paint station ---
+  P('lift', 0, 0, -6);
+  P('paintStation', 3.4, 0, -9);
+
+  // parts to scavenge & bolt on (duplicate kinds w/ different variants = choices)
+  const partSpawns: PartSpawn[] = [
+    { part: 'wheel', variantId: 'wheel.street', pos: { x: -9, y: 0.4, z: -3 } },
+    { part: 'wheel', variantId: 'wheel.street', pos: { x: -10.2, y: 0.4, z: -3.5 } },
+    { part: 'wheel', variantId: 'wheel.offroad', pos: { x: 9.4, y: 0.4, z: -3 } },
+    { part: 'wheel', variantId: 'wheel.offroad', pos: { x: 10.6, y: 0.4, z: -3.5 } },
+    { part: 'wheel', variantId: 'wheel.slick', pos: { x: -18, y: 0.4, z: -19.5 } },
+    { part: 'wheel', variantId: 'wheel.slick', pos: { x: 18, y: 0.4, z: -19.5 } },
+    { part: 'engine', variantId: 'engine.v4', pos: { x: 12, y: 0.7, z: -3 } },
+    { part: 'engine', variantId: 'engine.v6', pos: { x: -12, y: 1.35, z: -3 } },
+    { part: 'engine', variantId: 'engine.v8', pos: { x: -12, y: 1.25, z: -6 } },
+    { part: 'seat', variantId: 'seat.std', pos: { x: -24.5, y: 1.0, z: -18 } },
+    { part: 'seat', variantId: 'seat.racing', pos: { x: 24.5, y: 1.0, z: -4 } },
+    { part: 'body', variantId: 'body.std', pos: { x: 6, y: 0.5, z: -12 } },
+    { part: 'body', variantId: 'body.light', pos: { x: -6, y: 0.5, z: -12 } },
+    { part: 'body', variantId: 'body.armor', pos: { x: 0, y: 0.5, z: -19 } },
+    { part: 'battery', variantId: 'battery.std', pos: { x: -20, y: 0.45, z: -12 } },
+    { part: 'battery', variantId: 'battery.hd', pos: { x: 13.5, y: 0.45, z: -16 } },
+    { part: 'bumper', variantId: 'bumper.std', pos: { x: 14, y: 0.45, z: -12 } },
+    { part: 'bumper', variantId: 'bumper.bull', pos: { x: -14, y: 0.45, z: -12 } },
+    { part: 'headlights', variantId: 'headlights.std', pos: { x: 5, y: 0.95, z: 12 } },
+    { part: 'spoiler', variantId: 'spoiler.gt', pos: { x: 24, y: 1.0, z: 16 } },
+    { part: 'exhaust', variantId: 'exhaust.sport', pos: { x: -24, y: 1.0, z: 17 } },
+  ];
+
   return {
     bounds: { minX: -28, maxX: 28, minZ: -24, maxZ: 20 },
     solids,
@@ -283,10 +319,8 @@ export function makeGarage(): GarageLevel {
     spawnYaw: 0,
     wrenchPos: { x: 7, y: 1.05, z: 12 },
     flashlightPos: { x: -7, y: 1.05, z: 12 },
-    enginePos: { x: 12, y: 0.7, z: -3 },
-    benchPos: { x: -12, y: 1.0, z: -2.0 },
-    fusePos: { x: -12, y: 1.0, z: -2.0 },
-    boltPos: { x: -12, y: 1.0, z: -5.0 },
+    partSpawns,
+    paintPos: { x: 3.4, y: 1.0, z: -9 },
     lorePos: { x: -25.5, y: 1.0, z: -20 },
     kartStart: { x: 0, y: 0, z: -6 },
     kartYaw: 0,

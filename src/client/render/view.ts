@@ -15,6 +15,10 @@ import {
   skyTexture,
 } from './textures';
 import type { Prop } from '../../content/levels/garage';
+import type { Settings } from '../settings';
+import { Post } from './post';
+import { Particles } from './particles';
+import { buildHands } from './viewmodel';
 
 const closedGateY = (b: { center: Vec3 }) => b.center.y;
 
@@ -33,6 +37,14 @@ export class GameView {
   private clockScreen!: THREE.Mesh;
   private heldEngine!: THREE.Object3D;
   private heldTools = new Map<ItemKind, THREE.Object3D>();
+  private settings: Settings;
+  private post!: Post;
+  private particles!: Particles;
+  private vmPivot!: THREE.Group;
+  private baseFov: number;
+  private fovPulse = 0;
+  private shake = 0;
+  private vmTime = 0;
 
   // interpolation state
   private prevEye: Vec3;
@@ -40,15 +52,19 @@ export class GameView {
   private prevKart: { pos: Vec3; heading: number };
   private curKart: { pos: Vec3; heading: number };
 
-  constructor(world: World, container: HTMLElement) {
+  constructor(world: World, container: HTMLElement, settings: Settings) {
     this.world = world;
+    this.settings = settings;
+    this.baseFov = settings.video.fov;
     const lvl = world.level;
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setSize(innerWidth, innerHeight);
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = settings.video.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = settings.video.brightness;
     container.appendChild(this.renderer.domElement);
 
     const ext = world.level.exterior;
@@ -56,9 +72,9 @@ export class GameView {
     this.scene.background = new THREE.Color(ext.fogColor);
     this.scene.fog = new THREE.Fog(ext.fogColor, ext.fogNear, ext.fogFar);
 
-    const hemi = new THREE.HemisphereLight(0xcfe4ff, 0x53483a, 1.15);
+    const hemi = new THREE.HemisphereLight(0xcfe4ff, 0x53483a, 1.3);
     this.scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xfff2d8, 1.9);
+    const sun = new THREE.DirectionalLight(0xfff2d8, 1.5);
     sun.position.set(14, 28, 18);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -71,7 +87,14 @@ export class GameView {
     sun.shadow.camera.bottom = -s;
     this.scene.add(sun);
 
-    this.camera = new THREE.PerspectiveCamera(78, innerWidth / innerHeight, 0.05, 200);
+    // interior fill so the workshop isn't gloomy (shadowless = cheap)
+    for (const [z, intensity] of [[-20, 80] as const, [-10, 120] as const, [9, 95] as const]) {
+      const fill = new THREE.PointLight(0xfff0d0, intensity, 46, 2);
+      fill.position.set(0, 4.6, z);
+      this.scene.add(fill);
+    }
+
+    this.camera = new THREE.PerspectiveCamera(settings.video.fov, innerWidth / innerHeight, 0.05, 250);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
 
@@ -87,6 +110,9 @@ export class GameView {
     this.buildClockIn();
     this.buildHeld();
 
+    this.particles = new Particles(this.scene);
+    this.post = new Post(this.renderer, this.scene, this.camera, settings.video.quality, settings.video.postfx);
+
     const eye = world.eyePos();
     this.prevEye = { ...eye };
     this.curEye = { ...eye };
@@ -101,6 +127,7 @@ export class GameView {
     this.camera.aspect = innerWidth / innerHeight;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(innerWidth, innerHeight);
+    this.post?.setSize(innerWidth, innerHeight);
   };
 
   private addBox(b: { center: Vec3; half: Vec3 }, mat: THREE.Material): THREE.Mesh {
@@ -287,19 +314,23 @@ export class GameView {
   }
 
   private buildHeld(): void {
+    this.vmPivot = new THREE.Group();
+    this.camera.add(this.vmPivot);
+    this.vmPivot.add(buildHands());
+
     this.heldEngine = this.makeEngineMesh();
     this.heldEngine.scale.setScalar(0.55);
-    this.heldEngine.position.set(0, -0.45, -1.0);
+    this.heldEngine.position.set(0, -0.5, -1.1);
     this.heldEngine.visible = false;
-    this.camera.add(this.heldEngine);
+    this.vmPivot.add(this.heldEngine);
 
     for (const kind of ['wrench', 'flashlight'] as ItemKind[]) {
       const tool = this.makeItemMesh(kind);
       tool.scale.setScalar(0.8);
-      tool.position.set(0.32, -0.32, -0.6);
+      tool.position.set(0.26, -0.3, -0.55);
       tool.rotation.set(0.3, -0.3, 0.2);
       tool.visible = false;
-      this.camera.add(tool);
+      this.vmPivot.add(tool);
       this.heldTools.set(kind, tool);
     }
   }
@@ -627,16 +658,46 @@ export class GameView {
     this.curKart = { pos: { ...this.world.kart.pos }, heading: this.world.kart.heading };
   }
 
-  frame(alpha: number, yaw: number, pitch: number): void {
+  frame(dt: number, alpha: number, yaw: number, pitch: number): void {
     const w = this.world;
     const eye = {
       x: lerp(this.prevEye.x, this.curEye.x, alpha),
       y: lerp(this.prevEye.y, this.curEye.y, alpha),
       z: lerp(this.prevEye.z, this.curEye.z, alpha),
     };
-    this.camera.position.set(eye.x, eye.y, eye.z);
     this.camera.rotation.y = yaw;
     this.camera.rotation.x = pitch;
+
+    // speed-driven FOV kick + transient pulses (juice)
+    const speed = w.player.mode === 'kart' ? Math.abs(w.kart.speed) : Math.hypot(w.player.vel.x, w.player.vel.z);
+    const targetFov = this.baseFov + (Math.min(speed, 18) / 18) * 8 + this.fovPulse;
+    this.camera.fov += (targetFov - this.camera.fov) * Math.min(1, dt * 8);
+    this.camera.updateProjectionMatrix();
+    this.fovPulse *= 0.9;
+
+    this.camera.position.set(eye.x, eye.y, eye.z);
+    if (this.settings.accessibility.screenshake && this.shake > 0.001) {
+      this.camera.position.x += (Math.random() - 0.5) * this.shake;
+      this.camera.position.y += (Math.random() - 0.5) * this.shake;
+      this.camera.position.z += (Math.random() - 0.5) * this.shake;
+    }
+    this.shake *= 0.85;
+
+    // viewmodel bob/sway
+    this.vmTime += dt * (4 + speed);
+    if (this.vmPivot) {
+      const amp = this.settings.accessibility.headbob ? 1 : 0.4;
+      const sp = Math.min(speed / 8, 1.4);
+      this.vmPivot.position.y = Math.sin(this.vmTime) * 0.012 * sp * amp;
+      this.vmPivot.position.x = Math.cos(this.vmTime * 0.5) * 0.01 * sp * amp;
+    }
+
+    // kart exhaust + ambient dust
+    if (w.player.mode === 'kart' && Math.abs(w.kart.speed) > 1.5) {
+      const h = w.kart.heading;
+      this.particles.exhaust({ x: w.kart.pos.x + Math.sin(h) * 1.4, y: 0.5, z: w.kart.pos.z + Math.cos(h) * 1.4 });
+    }
+    this.particles.update(dt, { x: 0, y: 1.4, z: 17, r: 3.2 });
 
     // gate slides up as it opens
     const target = w.gateOpen ? 1 : 0;
@@ -702,6 +763,43 @@ export class GameView {
       screenMat.emissiveIntensity = 0.3;
     }
 
-    this.renderer.render(this.scene, this.camera);
+    this.post.render(dt, this.scene, this.camera);
+  }
+
+  applySettings(s: Settings): void {
+    const rebuild = s.video.postfx !== this.settings.video.postfx || s.video.quality !== this.settings.video.quality;
+    this.settings = s;
+    this.baseFov = s.video.fov;
+    this.renderer.toneMappingExposure = s.video.brightness;
+    this.renderer.shadowMap.enabled = s.video.shadows;
+    if (rebuild) {
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      this.post = new Post(this.renderer, this.scene, this.camera, s.video.quality, s.video.postfx);
+      this.post.setSize(innerWidth, innerHeight);
+    }
+  }
+
+  pulse(fov: number, shake: number): void {
+    this.fovPulse += fov;
+    this.shake += shake;
+  }
+  gateFx(): void {
+    this.pulse(7, 0.28);
+  }
+  installFx(): void {
+    const k = this.world.kart.pos;
+    this.particles.sparks({ x: k.x, y: 1.0, z: k.z });
+    this.pulse(2, 0.18);
+  }
+  checkpointFx(): void {
+    const k = this.world.kart.pos;
+    this.particles.burst({ x: k.x, y: 1.2, z: k.z }, [1, 0.82, 0.25]);
+    this.pulse(3, 0.2);
+  }
+  pickupFx(): void {
+    const d = new THREE.Vector3();
+    this.camera.getWorldDirection(d);
+    const e = this.world.eyePos();
+    this.particles.sparkle({ x: e.x + d.x * 1.3, y: e.y + d.y * 1.3, z: e.z + d.z * 1.3 });
   }
 }

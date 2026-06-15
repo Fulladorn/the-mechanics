@@ -2,6 +2,7 @@
 import { World } from '../sim/world';
 import { DT } from '../shared/constants';
 import { ITEM_DEFS, makeIntent, type Intent } from '../shared/types';
+import { loadSettings, type Settings } from './settings';
 import { horizontalSpeed } from '../sim/movement';
 import { GameView } from './render/view';
 import { Input } from './input';
@@ -25,11 +26,13 @@ let acc = 0;
 let last = 0;
 let forceActive = false; // dev/test: step without pointer lock
 let debugIntent: Intent | null = null;
+let settings: Settings;
 
 function boot(): void {
+  settings = loadSettings();
   try {
     world = new World();
-    view = new GameView(world, app);
+    view = new GameView(world, app, settings);
   } catch (err) {
     const l = document.getElementById('loading');
     if (l) l.querySelector('.msg')!.textContent = 'WebGL failed to start: ' + (err as Error).message;
@@ -92,7 +95,7 @@ function replay(): void {
   document.getElementById('win')!.classList.add('hidden');
   app.innerHTML = '';
   world = new World();
-  view = new GameView(world, app);
+  view = new GameView(world, app, settings);
   input.yaw = world.player.yaw;
   input.pitch = 0;
   hud.buildHotbar();
@@ -143,18 +146,22 @@ function drainEvents(): void {
         break;
       case 'pickup':
         hud.toast(`Picked up ${ITEM_DEFS[e.kind].label}`);
+        view.pickupFx();
         break;
       case 'gateOpen':
         hud.toast('⚡ Speed gate online!');
+        view.gateFx();
         break;
       case 'checkpoint':
         hud.toast(`Checkpoint ${e.index}/${e.total}`);
+        view.checkpointFx();
         break;
       case 'objectiveDone':
         hud.toast('Objective complete ✓');
         break;
       case 'install':
         hud.toast('Engine installed!');
+        view.installFx();
         break;
       case 'openPuzzle':
         openPuzzle();
@@ -191,7 +198,7 @@ function loop(now: number): void {
   }
 
   const alpha = active ? acc / DT : 1;
-  view.frame(alpha, input.yaw, input.pitch);
+  view.frame(dt, alpha, input.yaw, input.pitch);
 
   if (view) {
     const sp =

@@ -188,9 +188,9 @@ export function skyTexture(top = '#2a4a86', horizon = '#cfa86b'): THREE.Texture 
   const ctx = c.getContext('2d')!;
   const g = ctx.createLinearGradient(0, 0, 0, 256);
   g.addColorStop(0, top);
-  g.addColorStop(0.55, '#7e88a8');
-  g.addColorStop(0.82, horizon);
-  g.addColorStop(1, '#e7d8b4');
+  g.addColorStop(0.55, '#6b748f');
+  g.addColorStop(0.84, horizon);
+  g.addColorStop(1, '#b59c72');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 8, 256);
   const t = new THREE.CanvasTexture(c);

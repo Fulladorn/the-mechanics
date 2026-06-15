@@ -3,6 +3,7 @@ import { lerp, lerpAngle, type Vec3 } from '../../shared/math';
 import { CHECKPOINT_RADIUS } from '../../shared/constants';
 import type { World } from '../../sim/world';
 import { ITEM_DEFS, type ItemKind } from '../../shared/types';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   floorTexture,
   stripeTexture,
@@ -13,6 +14,8 @@ import {
   tireTexture,
   posterTexture,
   skyTexture,
+  floorNormalTexture,
+  wallNormalTexture,
 } from './textures';
 import type { Prop } from '../../content/levels/garage';
 import type { Settings } from '../settings';
@@ -76,8 +79,9 @@ export class GameView {
     this.baseFov = settings.video.fov;
     const lvl = world.level;
 
+    const hi = settings.video.quality === 'high';
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, hi ? 2.5 : 2));
     this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.shadowMap.enabled = settings.video.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -90,14 +94,26 @@ export class GameView {
     this.scene.background = new THREE.Color(ext.fogColor);
     this.scene.fog = new THREE.Fog(ext.fogColor, ext.fogNear, ext.fogFar);
 
-    const hemi = new THREE.HemisphereLight(0xb4c8e8, 0x3a3832, 0.9);
+    // image-based lighting: real reflections on metals + the car's clearcoat
+    try {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      this.scene.environmentIntensity = 0.5;
+      pmrem.dispose();
+    } catch {
+      /* env optional (weak GPU) */
+    }
+
+    const hemi = new THREE.HemisphereLight(0xb4c8e8, 0x3a3832, 0.85);
     this.scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff0d6, 2.0);
     sun.position.set(14, 28, 18);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(hi ? 4096 : 2048, hi ? 4096 : 2048);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 90;
+    sun.shadow.bias = -0.0003;
+    sun.shadow.normalBias = 0.02;
     const s = 40;
     sun.shadow.camera.left = -s;
     sun.shadow.camera.right = s;
@@ -105,12 +121,17 @@ export class GameView {
     sun.shadow.camera.bottom = -s;
     this.scene.add(sun);
 
-    // warm shop fill lights (the dust wash is fixed, so these can be punchier)
+    // warm shop fill lights
     for (const z of [-18, -6, 8]) {
-      const fill = new THREE.PointLight(0xffeede, 42, 30, 2);
+      const fill = new THREE.PointLight(0xffeede, 38, 30, 2);
       fill.position.set(0, 4.6, z);
       this.scene.add(fill);
     }
+    // a focused work light over the build lift
+    const liftSpot = new THREE.SpotLight(0xfff3da, 140, 16, Math.PI / 5, 0.5, 2);
+    liftSpot.position.set(0, 6.2, -6);
+    liftSpot.target.position.set(0, 0, -6);
+    this.scene.add(liftSpot, liftSpot.target);
 
     this.camera = new THREE.PerspectiveCamera(settings.video.fov, innerWidth / innerHeight, 0.05, 250);
     this.camera.rotation.order = 'YXZ';
@@ -160,7 +181,9 @@ export class GameView {
 
   private buildStatics(): void {
     const floorTex = floorTexture();
+    const floorNorm = floorNormalTexture();
     const wallTex = wallPanelTexture();
+    const wallNorm = wallNormalTexture();
     const doorMat = new THREE.MeshStandardMaterial({
       map: metalTexture('#2a2f3a'),
       metalness: 0.6,
@@ -171,12 +194,31 @@ export class GameView {
       let mat: THREE.Material;
       if (s.tag === 'floor') {
         floorTex.repeat.set(s.box.half.x, s.box.half.z);
-        mat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.96 });
+        floorNorm.repeat.set(s.box.half.x, s.box.half.z);
+        mat = new THREE.MeshStandardMaterial({
+          map: floorTex,
+          normalMap: floorNorm,
+          normalScale: new THREE.Vector2(0.5, 0.5),
+          roughness: 0.92,
+          metalness: 0.06,
+        });
       } else if (s.tag === 'wall' || s.tag === 'divider') {
+        const rx = Math.max(s.box.half.x, s.box.half.z) / 2;
+        const ry = Math.max(s.box.half.y, 1) / 1.5;
         const t = wallTex.clone();
         t.needsUpdate = true;
-        t.repeat.set(Math.max(s.box.half.x, s.box.half.z) / 2, Math.max(s.box.half.y, 1) / 1.5);
-        mat = new THREE.MeshStandardMaterial({ map: t, color: s.color, roughness: 0.85, metalness: 0.12 });
+        t.repeat.set(rx, ry);
+        const n = wallNorm.clone();
+        n.needsUpdate = true;
+        n.repeat.set(rx, ry);
+        mat = new THREE.MeshStandardMaterial({
+          map: t,
+          normalMap: n,
+          normalScale: new THREE.Vector2(0.55, 0.55),
+          color: s.color,
+          roughness: 0.85,
+          metalness: 0.12,
+        });
       } else if (s.tag === 'door') {
         mat = doorMat;
       } else {
@@ -352,10 +394,18 @@ export class GameView {
       case 'body': {
         const g = new THREE.Group();
         const wide = shape === 'armor' ? 1.9 : 1.7;
-        const shell = new THREE.Mesh(new THREE.BoxGeometry(wide, 0.5, 2.3), this.mat(bodyColor, 0.35, 0.5));
+        const paint = () =>
+          new THREE.MeshPhysicalMaterial({
+            color: bodyColor,
+            metalness: 0.5,
+            roughness: 0.32,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.18,
+          });
+        const shell = new THREE.Mesh(new THREE.BoxGeometry(wide, 0.5, 2.3), paint());
         shell.name = 'shell';
         shell.castShadow = true;
-        const hood = new THREE.Mesh(new THREE.BoxGeometry(wide - 0.2, 0.22, 0.9), this.mat(bodyColor, 0.35, 0.5));
+        const hood = new THREE.Mesh(new THREE.BoxGeometry(wide - 0.2, 0.22, 0.9), paint());
         hood.name = 'shell2';
         hood.position.set(0, 0.32, -0.7);
         hood.castShadow = true;

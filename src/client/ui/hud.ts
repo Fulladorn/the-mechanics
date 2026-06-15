@@ -13,6 +13,7 @@ export class Hud {
   private hotbar = byId('hotbar');
   private objList = $('#objectives ul');
   private toastEl = byId('toast');
+  private timerEl = byId('runtimer');
   private slots: HTMLElement[] = [];
   private objItems: HTMLElement[] = [];
   private hotbarSig = '';
@@ -58,6 +59,11 @@ export class Hud {
       this.prompt.style.opacity = '0';
       this.cross.classList.remove('active');
     }
+  }
+
+  setTimer(text: string, show: boolean): void {
+    this.timerEl.textContent = text;
+    this.timerEl.classList.toggle('show', show);
   }
 
   setSpeed(v: number): void {

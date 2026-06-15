@@ -58,6 +58,26 @@ try {
   await shot('04-workshop', 0, -10.5, 0, -0.02); // kart bay + benches + hoist + terminal
   await shot('05-corner', -14, -15, Math.PI / 4, 0); // shelves/tires/barrels corner
 
+  // repair puzzles
+  await page.evaluate(() => window.__mech?.openBolt());
+  await wait(400);
+  await page.screenshot({ path: 'screenshots/06-bolt.png' });
+  await page.keyboard.press('Escape');
+  await wait(300);
+  await page.evaluate(() => window.__mech?.openLore());
+  await wait(400);
+  await page.screenshot({ path: 'screenshots/07-lore.png' });
+  await page.keyboard.press('Escape');
+  await wait(300);
+
+  // UI: pause menu + settings panel
+  await page.evaluate(() => window.__mech?.pause());
+  await wait(400);
+  await page.screenshot({ path: 'screenshots/08-pause.png' });
+  await page.evaluate(() => window.__mech?.openSettings());
+  await wait(400);
+  await page.screenshot({ path: 'screenshots/09-settings.png' });
+
   console.log('CONSOLE/PAGE ERRORS:', errors.length ? errors : 'none');
 } catch (e) {
   console.log('SHOT ERROR:', e.message);

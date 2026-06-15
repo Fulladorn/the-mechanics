@@ -12,7 +12,10 @@ import { GameView } from './render/view';
 import { Input } from './input';
 import { Hud } from './ui/hud';
 import { PuzzleOverlay } from './ui/puzzle';
+import { BoltOverlay } from './ui/boltTorque';
+import { FuseOverlay } from './ui/fuseGrid';
 import { Sfx } from './audio';
+import { formatTime, recordBest } from '../shared/timer';
 
 const app = document.getElementById('app')!;
 
@@ -21,6 +24,8 @@ let view: GameView;
 let input: Input;
 let hud: Hud;
 let puzzle: PuzzleOverlay;
+let bolt: BoltOverlay;
+let fuse: FuseOverlay;
 let sfx: Sfx;
 
 let running = false;
@@ -50,6 +55,8 @@ function boot(): void {
   input = new Input(app, settings, world.player.yaw);
   hud = new Hud();
   puzzle = new PuzzleOverlay();
+  bolt = new BoltOverlay();
+  fuse = new FuseOverlay();
   sfx = new Sfx(settings);
   dispatch = new Dispatch(settings);
   intro = new Intro();
@@ -70,6 +77,10 @@ function boot(): void {
       openGate: () => {
         world.gateOpen = true;
       },
+      pause: () => openPause(),
+      openSettings: () => menu.openSettings(true),
+      openBolt: () => openBolt(),
+      openLore: () => openLore(),
       drive: (p: Partial<Intent>) => {
         const it = makeIntent();
         Object.assign(it, p);
@@ -163,22 +174,43 @@ function replay(): void {
   last = performance.now();
 }
 
-function openPuzzle(): void {
+function pauseForStation(): () => void {
   paused = true;
+  input.enabled = false;
+  input.clearHeld();
   document.exitPointerLock();
-  puzzle.show(
-    world.puzzle,
-    () => {
-      world.command({ t: 'solvePuzzle' });
-      drainEvents();
-      paused = false;
-      app.requestPointerLock();
-    },
-    () => {
-      paused = false;
-      app.requestPointerLock();
-    },
-  );
+  return () => {
+    paused = false;
+    input.enabled = true;
+    app.requestPointerLock();
+  };
+}
+
+function openPuzzle(): void {
+  const resume = pauseForStation();
+  puzzle.show(world.puzzle, () => {
+    world.command({ t: 'solvePuzzle' });
+    drainEvents();
+    resume();
+  }, resume);
+}
+
+function openBolt(): void {
+  const resume = pauseForStation();
+  bolt.show(world.bolt, () => {
+    world.command({ t: 'solveBolt' });
+    drainEvents();
+    resume();
+  }, resume);
+}
+
+function openLore(): void {
+  const resume = pauseForStation();
+  fuse.show(world.lorePuzzle, () => {
+    world.command({ t: 'solveLore' });
+    drainEvents();
+    resume();
+  }, resume);
 }
 
 function onWin(): void {
@@ -190,10 +222,13 @@ function onWin(): void {
     'EXTRACTION',
     'Training Complete',
     () => {
+      const res = recordBest('garage', world.elapsed);
       const card = document.getElementById('win')!;
       const sub = card.querySelector('.sub') as HTMLElement;
       sub.innerHTML =
-        `Vehicle delivered in <b>${world.elapsed.toFixed(1)}s</b>.<br>` +
+        `Delivered in <b>${formatTime(world.elapsed)}</b> · Best <b>${formatTime(res.best)}</b>` +
+        `${res.isNew ? ' <span style="color:#ffcf3f">NEW!</span>' : ''}` +
+        `${world.loreFound ? '<br><span style="color:#5fd9c8">Recovered log secured.</span>' : ''}<br>` +
         `Dispatch: “Clean work. Don't worry about that symbol on the crate…”`;
       card.classList.remove('hidden');
     },
@@ -235,6 +270,16 @@ function drainEvents(): void {
         break;
       case 'openPuzzle':
         openPuzzle();
+        break;
+      case 'openBolt':
+        openBolt();
+        break;
+      case 'openLore':
+        openLore();
+        break;
+      case 'lore':
+        hud.toast('📂 Recovered log found');
+        dispatch.say(DISPATCH.lore);
         break;
       case 'win':
         onWin();
@@ -295,6 +340,7 @@ function loop(now: number): void {
     const sp =
       world.player.mode === 'kart' ? Math.abs(world.kart.speed) : horizontalSpeed(world.player.vel);
     hud.setSpeed(sp);
+    hud.setTimer(formatTime(world.elapsed), running && !won);
     hud.setPrompt(running && !paused && !won ? (world.findInteract()?.label ?? null) : null);
     hud.updateHotbar(world.player.hotbar, world.player.selSlot, world.player.carrying);
     hud.updateObjectives(world.objectives.list, world.objectives.activeIndex());

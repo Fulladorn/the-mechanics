@@ -186,6 +186,13 @@
       }
       #subtitles.show { opacity: 1; }
 
+      #runtimer {
+        position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+        font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700;
+        color: #cdd5e0; opacity: 0; transition: opacity 0.2s; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+      }
+      #runtimer.show { opacity: 0.9; }
+
       #loading {
         position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column;
         align-items: center; justify-content: center; background: #0b0e14; gap: 18px;
@@ -205,6 +212,7 @@
       <div id="crosshair"></div>
       <div id="prompt"></div>
       <div id="speedo"><div class="val">0.0</div><div class="unit">M/S</div></div>
+      <div id="runtimer">0:00.0</div>
       <div id="hotbar"></div>
       <div id="objectives"><h3>Training Checklist</h3><ul></ul></div>
     </div>

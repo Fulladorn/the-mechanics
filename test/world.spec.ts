@@ -85,10 +85,16 @@ describe('garage full playthrough (headless)', () => {
     // 4. repair the fuse panel (walk to bench, open it, solve via the UI command)
     walkTo(w, { x: 0, y: 0, z: 4 }); // approach the gate gap from the south
     walkTo(w, { x: 0, y: 0, z: -4 }); // through to the north workshop
-    walkTo(w, lvl.benchPos);
-    interactWith(w, lvl.benchPos);
+    walkTo(w, lvl.fusePos);
+    interactWith(w, lvl.fusePos);
     w.command({ t: 'solvePuzzle' });
     expect(w.objectives.isDone('puzzle')).toBe(true);
+
+    // 4b. torque the engine-mount bolts
+    walkTo(w, lvl.boltPos);
+    interactWith(w, lvl.boltPos);
+    w.command({ t: 'solveBolt' });
+    expect(w.objectives.isDone('bolt')).toBe(true);
 
     // 5. carry the engine block to the kart and install it
     walkTo(w, lvl.enginePos);

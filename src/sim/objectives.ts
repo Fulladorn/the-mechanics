@@ -1,6 +1,6 @@
 import type { SimEvent } from '../shared/types';
 
-export type ObjectiveId = 'move' | 'bhop' | 'pickup' | 'puzzle' | 'carry' | 'drive' | 'clockin';
+export type ObjectiveId = 'move' | 'bhop' | 'pickup' | 'puzzle' | 'bolt' | 'carry' | 'drive' | 'clockin';
 
 export interface Objective {
   id: ObjectiveId;
@@ -13,6 +13,7 @@ export const OBJECTIVE_LIST: ReadonlyArray<{ id: ObjectiveId; text: string }> = 
   { id: 'bhop', text: 'Hold Space + strafe to bunny-hop through the speed gate (10 m/s)' },
   { id: 'pickup', text: 'Pick up the Wrench (E)' },
   { id: 'puzzle', text: 'Repair the fuse panel (E) — match the wires' },
+  { id: 'bolt', text: 'Torque the engine-mount bolts (E) — hit the green band' },
   { id: 'carry', text: 'Carry the Engine Block to the kart and install it (E)' },
   { id: 'drive', text: 'Drive the go-kart through every checkpoint' },
   { id: 'clockin', text: 'Clock out at the exit terminal (E)' },

@@ -3,6 +3,7 @@ import { lerp, lerpAngle, type Vec3 } from '../../shared/math';
 import { CHECKPOINT_RADIUS } from '../../shared/constants';
 import type { World } from '../../sim/world';
 import { ITEM_DEFS, type ItemKind } from '../../shared/types';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import {
   floorTexture,
   stripeTexture,
@@ -13,12 +14,25 @@ import {
   tireTexture,
   posterTexture,
   skyTexture,
+  floorNormalTexture,
+  wallNormalTexture,
 } from './textures';
 import type { Prop } from '../../content/levels/garage';
 import type { Settings } from '../settings';
+import { isDrivable, variantById, type PartKind, type PartVariant } from '../../sim/vehicle';
 import { Post } from './post';
 import { Particles } from './particles';
 import { buildHands } from './viewmodel';
+
+const disposeTree = (o: THREE.Object3D): void => {
+  o.traverse((c) => {
+    if (c instanceof THREE.Mesh) {
+      c.geometry.dispose();
+      const m = c.material as THREE.Material | THREE.Material[];
+      Array.isArray(m) ? m.forEach((x) => x.dispose()) : m.dispose();
+    }
+  });
+};
 
 const closedGateY = (b: { center: Vec3 }) => b.center.y;
 
@@ -32,10 +46,14 @@ export class GameView {
   private gateAnim = 0;
   private itemMeshes = new Map<number, THREE.Object3D>();
   private kartGroup!: THREE.Group;
-  private kartEngine!: THREE.Object3D;
+  private socketMeshes = new Map<string, THREE.Group>();
+  private socketState = new Map<string, string | null>();
+  private bodyMat?: THREE.MeshStandardMaterial;
+  private lastBodyColor = -1;
   private checkpointMeshes: THREE.Mesh[] = [];
   private clockScreen!: THREE.Mesh;
-  private heldEngine!: THREE.Object3D;
+  private heldPart!: THREE.Group;
+  private heldKey = '';
   private heldTools = new Map<ItemKind, THREE.Object3D>();
   private settings: Settings;
   private post!: Post;
@@ -61,8 +79,9 @@ export class GameView {
     this.baseFov = settings.video.fov;
     const lvl = world.level;
 
+    const hi = settings.video.quality === 'high';
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, hi ? 2.5 : 2));
     this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.shadowMap.enabled = settings.video.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -75,14 +94,26 @@ export class GameView {
     this.scene.background = new THREE.Color(ext.fogColor);
     this.scene.fog = new THREE.Fog(ext.fogColor, ext.fogNear, ext.fogFar);
 
-    const hemi = new THREE.HemisphereLight(0xb4c8e8, 0x3a3832, 0.9);
+    // image-based lighting: real reflections on metals + the car's clearcoat
+    try {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      this.scene.environmentIntensity = 0.5;
+      pmrem.dispose();
+    } catch {
+      /* env optional (weak GPU) */
+    }
+
+    const hemi = new THREE.HemisphereLight(0xb4c8e8, 0x3a3832, 0.85);
     this.scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff0d6, 2.0);
     sun.position.set(14, 28, 18);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(hi ? 4096 : 2048, hi ? 4096 : 2048);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 90;
+    sun.shadow.bias = -0.0003;
+    sun.shadow.normalBias = 0.02;
     const s = 40;
     sun.shadow.camera.left = -s;
     sun.shadow.camera.right = s;
@@ -90,12 +121,17 @@ export class GameView {
     sun.shadow.camera.bottom = -s;
     this.scene.add(sun);
 
-    // warm shop fill lights (the dust wash is fixed, so these can be punchier)
+    // warm shop fill lights
     for (const z of [-18, -6, 8]) {
-      const fill = new THREE.PointLight(0xffeede, 42, 30, 2);
+      const fill = new THREE.PointLight(0xffeede, 38, 30, 2);
       fill.position.set(0, 4.6, z);
       this.scene.add(fill);
     }
+    // a focused work light over the build lift
+    const liftSpot = new THREE.SpotLight(0xfff3da, 140, 16, Math.PI / 5, 0.5, 2);
+    liftSpot.position.set(0, 6.2, -6);
+    liftSpot.target.position.set(0, 0, -6);
+    this.scene.add(liftSpot, liftSpot.target);
 
     this.camera = new THREE.PerspectiveCamera(settings.video.fov, innerWidth / innerHeight, 0.05, 250);
     this.camera.rotation.order = 'YXZ';
@@ -108,7 +144,7 @@ export class GameView {
     this.buildGate();
     this.buildLaneDeco();
     this.buildItems();
-    this.buildKart();
+    this.buildVehicle();
     this.buildCheckpoints();
     this.buildClockIn();
     this.buildHeld();
@@ -145,7 +181,9 @@ export class GameView {
 
   private buildStatics(): void {
     const floorTex = floorTexture();
+    const floorNorm = floorNormalTexture();
     const wallTex = wallPanelTexture();
+    const wallNorm = wallNormalTexture();
     const doorMat = new THREE.MeshStandardMaterial({
       map: metalTexture('#2a2f3a'),
       metalness: 0.6,
@@ -156,12 +194,31 @@ export class GameView {
       let mat: THREE.Material;
       if (s.tag === 'floor') {
         floorTex.repeat.set(s.box.half.x, s.box.half.z);
-        mat = new THREE.MeshStandardMaterial({ map: floorTex, roughness: 0.96 });
+        floorNorm.repeat.set(s.box.half.x, s.box.half.z);
+        mat = new THREE.MeshStandardMaterial({
+          map: floorTex,
+          normalMap: floorNorm,
+          normalScale: new THREE.Vector2(0.5, 0.5),
+          roughness: 0.92,
+          metalness: 0.06,
+        });
       } else if (s.tag === 'wall' || s.tag === 'divider') {
+        const rx = Math.max(s.box.half.x, s.box.half.z) / 2;
+        const ry = Math.max(s.box.half.y, 1) / 1.5;
         const t = wallTex.clone();
         t.needsUpdate = true;
-        t.repeat.set(Math.max(s.box.half.x, s.box.half.z) / 2, Math.max(s.box.half.y, 1) / 1.5);
-        mat = new THREE.MeshStandardMaterial({ map: t, color: s.color, roughness: 0.85, metalness: 0.12 });
+        t.repeat.set(rx, ry);
+        const n = wallNorm.clone();
+        n.needsUpdate = true;
+        n.repeat.set(rx, ry);
+        mat = new THREE.MeshStandardMaterial({
+          map: t,
+          normalMap: n,
+          normalScale: new THREE.Vector2(0.55, 0.55),
+          color: s.color,
+          roughness: 0.85,
+          metalness: 0.12,
+        });
       } else if (s.tag === 'door') {
         mat = doorMat;
       } else {
@@ -225,11 +282,11 @@ export class GameView {
     return g;
   }
 
-  private makeEngineMesh(): THREE.Object3D {
+  private makeEngineMesh(color = 0x3b6ea5): THREE.Object3D {
     const g = new THREE.Group();
     const block = new THREE.Mesh(
       new THREE.BoxGeometry(0.95, 0.7, 1.1),
-      new THREE.MeshStandardMaterial({ color: 0x3b6ea5, metalness: 0.6, roughness: 0.4 }),
+      new THREE.MeshStandardMaterial({ color, metalness: 0.6, roughness: 0.4 }),
     );
     block.castShadow = true;
     const top = new THREE.Mesh(
@@ -262,36 +319,147 @@ export class GameView {
     }
   }
 
-  private buildKart(): void {
+  // The buildable vehicle: a bare chassis frame + an (initially empty) child
+  // group per socket. frame() fills/swaps a socket group as parts are installed.
+  private buildVehicle(): void {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(
-      new THREE.BoxGeometry(1.7, 0.5, 2.4),
-      new THREE.MeshStandardMaterial({ color: 0xe5484d, metalness: 0.3, roughness: 0.5 }),
-    );
-    body.position.y = 0.55;
-    body.castShadow = true;
-    const seat = new THREE.Mesh(
-      new THREE.BoxGeometry(0.7, 0.5, 0.7),
-      new THREE.MeshStandardMaterial({ color: 0x222831 }),
-    );
-    seat.position.set(0, 0.95, 0.2);
-    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x16181d, roughness: 0.8 });
-    for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        const w = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16), wheelMat);
-        w.rotation.z = Math.PI / 2;
-        w.position.set(sx * 0.85, 0.4, sz * 0.85);
-        w.castShadow = true;
-        g.add(w);
+    const frameMat = this.mat(0x3a3f48, 0.7, 0.5);
+    const railL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.2, 2.5), frameMat);
+    railL.position.set(-0.6, 0.45, 0);
+    const railR = railL.clone();
+    railR.position.x = 0.6;
+    const cross1 = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.16, 0.18), frameMat);
+    cross1.position.set(0, 0.45, -0.9);
+    const cross2 = cross1.clone();
+    cross2.position.z = 0.9;
+    const pan = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.08, 1.9), this.mat(0x2a2f38, 0.5, 0.6));
+    pan.position.set(0, 0.4, 0);
+    g.add(railL, railR, cross1, cross2, pan);
+    g.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.castShadow = true;
+        o.receiveShadow = true;
       }
+    });
+    for (const s of this.world.vehicle.sockets) {
+      const sg = new THREE.Group();
+      sg.position.set(s.anchor.x, s.anchor.y, s.anchor.z);
+      g.add(sg);
+      this.socketMeshes.set(s.id, sg);
+      this.socketState.set(s.id, null);
     }
-    this.kartEngine = this.makeEngineMesh();
-    this.kartEngine.scale.setScalar(0.7);
-    this.kartEngine.position.set(0, 0.95, -0.85);
-    this.kartEngine.visible = false;
-    g.add(body, seat, this.kartEngine);
     this.scene.add(g);
     this.kartGroup = g;
+  }
+
+  /** Build the mesh for an installed part variant. */
+  private makePart(kind: PartKind, variant: PartVariant, bodyColor: number): THREE.Object3D {
+    const col = variant.render.color ?? 0x8a8f99;
+    const shape = variant.render.shape ?? '';
+    switch (kind) {
+      case 'wheel': {
+        const g = new THREE.Group();
+        const w = shape === 'slick' ? 0.42 : 0.3;
+        const r = shape === 'offroad' ? 0.46 : 0.4;
+        const tire = this.cy(r, r, w, col, 18, 0.2, 0.85);
+        tire.rotation.z = Math.PI / 2;
+        const hub = this.cy(0.16, 0.16, w + 0.02, 0xc8d0dc, 10, 0.8, 0.3);
+        hub.rotation.z = Math.PI / 2;
+        g.add(tire, hub);
+        if (shape === 'offroad') {
+          for (let i = 0; i < 10; i++) {
+            const lug = this.bx(0.08, 0.08, w + 0.04, 0x0e1013, 0.2, 0.9);
+            const a = (i / 10) * Math.PI * 2;
+            lug.position.set(0, Math.cos(a) * r, Math.sin(a) * r);
+            g.add(lug);
+          }
+        }
+        g.traverse((o) => o instanceof THREE.Mesh && (o.castShadow = true));
+        return g;
+      }
+      case 'engine':
+        return this.makeEngineMesh(col);
+      case 'battery':
+        return this.bx(0.34, 0.34, 0.5, col, 0.2, 0.6);
+      case 'seat': {
+        const g = new THREE.Group();
+        const base = this.bx(0.6, 0.18, 0.6, col, 0.1, 0.8);
+        base.position.y = 0.1;
+        const back = this.bx(0.6, 0.7, 0.16, col, 0.1, 0.8);
+        back.position.set(0, 0.45, 0.28);
+        g.add(base, back);
+        g.traverse((o) => o instanceof THREE.Mesh && (o.castShadow = true));
+        return g;
+      }
+      case 'body': {
+        const g = new THREE.Group();
+        const wide = shape === 'armor' ? 1.9 : 1.7;
+        const paint = () =>
+          new THREE.MeshPhysicalMaterial({
+            color: bodyColor,
+            metalness: 0.5,
+            roughness: 0.32,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.18,
+          });
+        const shell = new THREE.Mesh(new THREE.BoxGeometry(wide, 0.5, 2.3), paint());
+        shell.name = 'shell';
+        shell.castShadow = true;
+        const hood = new THREE.Mesh(new THREE.BoxGeometry(wide - 0.2, 0.22, 0.9), paint());
+        hood.name = 'shell2';
+        hood.position.set(0, 0.32, -0.7);
+        hood.castShadow = true;
+        g.add(shell, hood);
+        if (shape === 'armor') {
+          for (const sx of [-1, 1]) {
+            const plate = this.bx(0.16, 0.5, 2.0, 0x6b7280, 0.6, 0.5);
+            plate.position.set(sx * (wide / 2 + 0.02), 0, 0);
+            g.add(plate);
+          }
+        }
+        return g;
+      }
+      case 'bumper':
+        return this.bx(shape === '' ? 1.7 : 1.9, 0.22, 0.25, col, 0.5, 0.5);
+      case 'headlights': {
+        const g = new THREE.Group();
+        for (const sx of [-1, 1]) {
+          const lamp = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.13, 0.13, 0.1, 14),
+            new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: col, emissiveIntensity: 1.6 }),
+          );
+          lamp.rotation.x = Math.PI / 2;
+          lamp.position.set(sx * 0.55, 0, 0);
+          g.add(lamp);
+        }
+        return g;
+      }
+      case 'spoiler': {
+        const g = new THREE.Group();
+        const wing = this.bx(1.5, 0.08, 0.4, col, 0.4, 0.4);
+        wing.position.y = 0.3;
+        for (const sx of [-1, 1]) {
+          const strut = this.bx(0.08, 0.3, 0.12, col, 0.4, 0.4);
+          strut.position.set(sx * 0.6, 0.15, 0);
+          g.add(strut);
+        }
+        g.add(wing);
+        g.traverse((o) => o instanceof THREE.Mesh && (o.castShadow = true));
+        return g;
+      }
+      case 'exhaust': {
+        const g = new THREE.Group();
+        const pipe = this.cy(0.06, 0.06, 0.7, col, 10, 0.8, 0.3);
+        pipe.rotation.x = Math.PI / 2;
+        const tip = this.cy(0.09, 0.07, 0.12, 0xdfe3ea, 10, 0.9, 0.2);
+        tip.rotation.x = Math.PI / 2;
+        tip.position.z = 0.4;
+        g.add(pipe, tip);
+        return g;
+      }
+      default:
+        return new THREE.Group();
+    }
   }
 
   private buildCheckpoints(): void {
@@ -321,11 +489,10 @@ export class GameView {
     this.camera.add(this.vmPivot);
     this.vmPivot.add(buildHands());
 
-    this.heldEngine = this.makeEngineMesh();
-    this.heldEngine.scale.setScalar(0.55);
-    this.heldEngine.position.set(0, -0.5, -1.1);
-    this.heldEngine.visible = false;
-    this.vmPivot.add(this.heldEngine);
+    this.heldPart = new THREE.Group();
+    this.heldPart.position.set(0, -0.5, -1.0);
+    this.heldPart.visible = false;
+    this.vmPivot.add(this.heldPart);
 
     for (const kind of ['wrench', 'flashlight'] as ItemKind[]) {
       const tool = this.makeItemMesh(kind);
@@ -523,6 +690,10 @@ export class GameView {
         return this.makeBird();
       case 'roadline':
         return this.makeRoadline();
+      case 'lift':
+        return this.makeLift();
+      case 'paintStation':
+        return this.makePaintStation();
       default:
         return null;
     }
@@ -1062,6 +1233,46 @@ export class GameView {
     return g;
   }
 
+  private makeLift(): THREE.Group {
+    const g = new THREE.Group();
+    const plate = this.bx(2.6, 0.12, 3.4, 0x2a2f38, 0.5, 0.6);
+    plate.position.y = 0.06;
+    g.add(plate);
+    const stripe = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.6, 3.4),
+      new THREE.MeshStandardMaterial({ color: 0xffcf3f, emissive: 0x4a3a00, emissiveIntensity: 0.4, transparent: true, opacity: 0.25 }),
+    );
+    stripe.rotation.x = -Math.PI / 2;
+    stripe.position.y = 0.13;
+    g.add(stripe);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const post = this.cy(0.1, 0.12, 0.5, 0x4a525e, 8, 0.6, 0.5);
+      post.position.set(sx * 1.1, 0.25, sz * 1.5);
+      g.add(post);
+    }
+    return g;
+  }
+
+  private makePaintStation(): THREE.Group {
+    const g = new THREE.Group();
+    const cab = this.bx(1.0, 1.2, 0.7, 0x394150, 0.4, 0.6);
+    cab.position.y = 0.6;
+    cab.castShadow = true;
+    const screen = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.7, 0.4),
+      new THREE.MeshStandardMaterial({ color: 0x0a141f, emissive: 0x2f7fd1, emissiveIntensity: 1.0 }),
+    );
+    screen.position.set(0, 0.9, 0.36);
+    g.add(cab, screen);
+    const cols = [0xe5484d, 0x2f7fd1, 0x39b36b, 0xf1c40f];
+    cols.forEach((c, i) => {
+      const can = this.cy(0.09, 0.09, 0.26, c, 10, 0.3, 0.5);
+      can.position.set(-0.33 + i * 0.22, 1.33, 0);
+      g.add(can);
+    });
+    return g;
+  }
+
   private updateAnimated(dt: number): void {
     this.clock += dt;
     const t = this.clock;
@@ -1193,11 +1404,59 @@ export class GameView {
     };
     this.kartGroup.position.set(kpos.x, 0, kpos.z);
     this.kartGroup.rotation.y = lerpAngle(this.prevKart.heading, this.curKart.heading, alpha);
-    this.kartEngine.visible = w.kart.engineInstalled;
     this.kartGroup.visible = w.player.mode !== 'kart'; // hide chassis in first-person drive
 
-    // held items
-    this.heldEngine.visible = w.player.carrying === 'engine';
+    // installed parts: (re)build a socket's mesh only when it changes
+    for (const s of w.vehicle.sockets) {
+      if (this.socketState.get(s.id) === s.installed) continue;
+      this.socketState.set(s.id, s.installed);
+      const grp = this.socketMeshes.get(s.id);
+      if (!grp) continue;
+      while (grp.children.length) {
+        const c = grp.children[0];
+        grp.remove(c);
+        disposeTree(c);
+      }
+      if (s.installed) {
+        const variant = variantById(s.installed);
+        if (variant) {
+          grp.add(this.makePart(s.accepts, variant, w.vehicle.bodyColor));
+          if (s.accepts === 'body') {
+            this.bodyMat = (grp.getObjectByName('shell') as THREE.Mesh | undefined)?.material as THREE.MeshStandardMaterial;
+            this.lastBodyColor = -1; // force a repaint sync
+          }
+        }
+      }
+    }
+    // repaint the body shell when the color changes
+    if (this.bodyMat && this.lastBodyColor !== w.vehicle.bodyColor) {
+      this.lastBodyColor = w.vehicle.bodyColor;
+      this.bodyMat.color.setHex(w.vehicle.bodyColor);
+      const hood = this.socketMeshes.get('body')?.children[0]?.getObjectByName('shell2') as THREE.Mesh | undefined;
+      (hood?.material as THREE.MeshStandardMaterial | undefined)?.color.setHex(w.vehicle.bodyColor);
+    }
+
+    // held part (carried) + tools
+    const carry = w.player.carrying;
+    const cv = w.player.carryingVariant;
+    const key = carry && cv ? `${carry}|${cv}` : '';
+    if (key !== this.heldKey) {
+      this.heldKey = key;
+      while (this.heldPart.children.length) {
+        const c = this.heldPart.children[0];
+        this.heldPart.remove(c);
+        disposeTree(c);
+      }
+      if (carry && cv) {
+        const variant = variantById(cv);
+        if (variant) {
+          const m = this.makePart(carry as PartKind, variant, w.vehicle.bodyColor);
+          m.scale.setScalar(0.5);
+          this.heldPart.add(m);
+        }
+      }
+    }
+    this.heldPart.visible = !!key && w.player.mode === 'foot';
     const sel = w.player.hotbar[w.player.selSlot];
     for (const [kind, mesh] of this.heldTools) {
       mesh.visible = w.player.mode === 'foot' && !w.player.carrying && sel === kind;
@@ -1212,7 +1471,7 @@ export class GameView {
         mat.color.setHex(0x2faf6a);
         mat.emissive.setHex(0x0a3018);
         ring.visible = true;
-      } else if (i === w.cpIndex && w.kart.engineInstalled) {
+      } else if (i === w.cpIndex && isDrivable(w.vehicle)) {
         mat.color.setHex(0xffcf3f);
         mat.emissive.setHex(0x4a3500);
         mat.emissiveIntensity = 0.6 + 0.4 * Math.sin(t);

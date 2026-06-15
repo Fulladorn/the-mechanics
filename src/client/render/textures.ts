@@ -211,3 +211,79 @@ export function sparkTexture(): THREE.Texture {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+/** Tangent-space normal map derived (Sobel) from a grayscale height drawn by `draw`. */
+export function normalMapFrom(
+  draw: (ctx: CanvasRenderingContext2D, size: number) => void,
+  size = 256,
+  strength = 2.2,
+): THREE.Texture {
+  const { c, ctx } = makeCanvas(size);
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, size, size);
+  draw(ctx, size);
+  const src = ctx.getImageData(0, 0, size, size).data;
+  const out = ctx.createImageData(size, size);
+  const o = out.data;
+  const h = (x: number, y: number) => src[(((y + size) % size) * size + ((x + size) % size)) * 4] / 255;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const nx = (h(x - 1, y) - h(x + 1, y)) * strength;
+      const ny = (h(x, y - 1) - h(x, y + 1)) * strength;
+      const inv = 1 / Math.hypot(nx, ny, 1);
+      const i = (y * size + x) * 4;
+      o[i] = (nx * inv * 0.5 + 0.5) * 255;
+      o[i + 1] = (ny * inv * 0.5 + 0.5) * 255;
+      o[i + 2] = inv * 255;
+      o[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(out, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.NoColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+export function floorNormalTexture(): THREE.Texture {
+  return normalMapFrom(
+    (ctx, s) => {
+      ctx.strokeStyle = '#1e1e1e';
+      ctx.lineWidth = s * 0.03;
+      ctx.strokeRect(0, 0, s, s);
+      for (let i = 0; i < 60; i++) {
+        ctx.fillStyle = Math.random() > 0.5 ? '#aaaaaa' : '#555555';
+        ctx.beginPath();
+        ctx.arc(Math.random() * s, Math.random() * s, 1.5 + Math.random() * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    },
+    256,
+    1.5,
+  );
+}
+
+export function wallNormalTexture(): THREE.Texture {
+  return normalMapFrom(
+    (ctx, s) => {
+      const step = s / 8;
+      for (let x = 0; x < s; x += step) {
+        ctx.fillStyle = '#c8c8c8';
+        ctx.fillRect(x, 0, step / 2, s);
+        ctx.fillStyle = '#3a3a3a';
+        ctx.fillRect(x + step / 2, 0, step / 2, s);
+      }
+      for (let y = s * 0.12; y < s; y += s * 0.25) {
+        for (let x = s * 0.06; x < s; x += step) {
+          ctx.fillStyle = '#e8e8e8';
+          ctx.beginPath();
+          ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    },
+    256,
+    2.4,
+  );
+}

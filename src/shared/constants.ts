@@ -43,3 +43,10 @@ export const KART_FRICTION = 4;
 export const KART_BRAKE = 26;
 export const KART_TURN_RATE = 2.2; // rad/s, scaled by current speed
 export const CHECKPOINT_RADIUS = 3.0;
+
+// --- Vehicle build (baseline stats for a bare-but-required-complete chassis) ---
+// Anchored to the legacy kart feel: base-variant build resolves to these.
+export const VEHICLE_BASE_TOPSPEED = KART_MAX_SPEED; // 17
+export const VEHICLE_BASE_ACCEL = KART_ACCEL; // 16
+export const VEHICLE_BASE_GRIP = 1.0; // steering-authority multiplier
+export const VEHICLE_BASE_DURABILITY = 1.0; // wall-impact resilience

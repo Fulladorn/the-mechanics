@@ -26,13 +26,18 @@ welding robot throwing sparks, spinning fans, swaying lamps. The full core loop:
 
 - First-person movement with skill-based **bunny-hopping** (auto-hop assist),
   view-bobbing **hands**, FOV-kick + screenshake juice.
-- Look-to-interact **pickup + toolbelt**, **carry-and-install** an engine.
-- **Three repair puzzle types** — wire-match, bolt-torque, lights-out — plus a
+- **Build & customize your vehicle**: scavenge parts (wheels, engine, battery,
+  seat, body, bumper, lights, spoiler, exhaust) scattered around the garage,
+  carry them over and **bolt them into the chassis sockets**. Part **variants
+  change looks AND driving stats** (top speed / accel / grip / durability),
+  shown on a live **spec sheet**; a paint station recolors the body. Plus a
   hidden **lore crate** that seeds the mystery.
-- **Drive a go-kart** through a checkpoint loop; **run timer + best time**.
+- **Drive your build** through a checkpoint loop; **run timer + best time**.
 - **Dispatch** narration (browser TTS) + subtitles; procedural ambient + music + SFX.
-- Post-processing (bloom/AO/SMAA), **pause menu + full settings** (video/audio/
-  controls with **key rebinding**/accessibility), in-engine intro & outro.
+- Graphics: **environment-mapped reflections**, **clearcoat car paint**,
+  normal-mapped surfaces, post-FX (bloom/AO/SMAA), 4096 shadows. **Pause menu +
+  full settings** (video/audio/controls with **key rebinding**/accessibility),
+  in-engine intro & outro.
 
 Co-op netcode and the three real missions (Mountains, Ocean, Moon) come next,
 per the roadmap.

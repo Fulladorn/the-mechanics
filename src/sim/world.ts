@@ -20,15 +20,30 @@ import {
 import type { Box } from './collision';
 import { horizontalSpeed, stepMovement, type Mover } from './movement';
 import { makeKart, stepKart, type KartState } from './kart';
-import { makeWirePuzzle, type WirePuzzle } from './puzzles/wireMatch';
-import { makeBoltTorque, type BoltPuzzle } from './puzzles/boltTorque';
 import { makeFuseGrid, type FusePuzzle } from './puzzles/fuseGrid';
+import {
+  PART_VARIANTS,
+  deriveStats,
+  installPart,
+  isDrivable,
+  makeVehicle,
+  openSockets,
+  variantById,
+  type PartKind,
+  type Vehicle,
+} from './vehicle';
 import { Objectives } from './objectives';
 import { makeGarage, type GarageLevel } from '../content/levels/garage';
+
+const PART_KINDS = new Set<string>(Object.keys(PART_VARIANTS));
+const isPartKind = (k: string): k is PartKind => PART_KINDS.has(k);
+
+const PAINT_PALETTE = [0xe5484d, 0x2f7fd1, 0x39b36b, 0xf1c40f, 0x8e44ad, 0xe67e22, 0x16a085, 0xdfe3ea];
 
 export interface Player extends Mover {
   mode: 'foot' | 'kart';
   carrying: ItemKind | null;
+  carryingVariant: string | null;
   hotbar: (ItemKind | null)[];
   selSlot: number;
   topSpeed: number;
@@ -40,11 +55,8 @@ export class World {
   player: Player;
   items: WorldItem[];
   kart: KartState;
-  puzzle: WirePuzzle;
-  bolt: BoltPuzzle;
+  vehicle: Vehicle;
   lorePuzzle: FusePuzzle;
-  puzzleSolved = false;
-  boltSolved = false;
   loreFound = false;
   gateOpen = false;
   cpIndex = 0;
@@ -65,6 +77,7 @@ export class World {
       height: STAND_HEIGHT,
       mode: 'foot',
       carrying: null,
+      carryingVariant: null,
       hotbar: [null, null, null, null, null, null],
       selSlot: 0,
       topSpeed: 0,
@@ -74,17 +87,24 @@ export class World {
     this.items = [
       { id: id++, kind: 'wrench', pos: { ...level.wrenchPos }, picked: false },
       { id: id++, kind: 'flashlight', pos: { ...level.flashlightPos }, picked: false },
-      { id: id++, kind: 'engine', pos: { ...level.enginePos }, picked: false },
     ];
+    for (const sp of level.partSpawns) {
+      this.items.push({ id: id++, kind: sp.part, pos: { ...sp.pos }, picked: false, variantId: sp.variantId });
+    }
     this.kart = makeKart(level.kartStart, level.kartYaw);
-    this.puzzle = makeWirePuzzle(level.puzzleSeed, 4);
-    this.bolt = makeBoltTorque(level.puzzleSeed + 1, 4);
+    this.vehicle = makeVehicle();
     this.lorePuzzle = makeFuseGrid(level.puzzleSeed + 2, 3);
   }
 
   eyePos(): Vec3 {
     const p = this.player;
     return { x: p.pos.x, y: p.pos.y + p.height - EYE_DROP, z: p.pos.z };
+  }
+
+  /** World position of a chassis socket (chassis sits at kartStart, yaw 0). */
+  private socketWorldPos(anchor: Vec3): Vec3 {
+    const o = this.level.kartStart;
+    return { x: o.x + anchor.x, y: anchor.y, z: o.z + anchor.z };
   }
 
   /** Walls/structures + the closed gate. Used for the kart (never itself). */
@@ -94,7 +114,7 @@ export class World {
     return boxes;
   }
 
-  /** Static geometry plus the parked kart (solid while you're on foot). */
+  /** Static geometry plus the parked vehicle (solid while you're on foot). */
   playerBoxes(): Box[] {
     const boxes = this.staticBoxes();
     if (this.player.mode === 'foot') {
@@ -106,6 +126,7 @@ export class World {
   step(intent: Intent, dt: number): void {
     this.elapsed += dt;
     const p = this.player;
+    const stats = deriveStats(this.vehicle);
 
     if (p.mode === 'foot') {
       const before = { x: p.pos.x, z: p.pos.z };
@@ -121,11 +142,9 @@ export class World {
         this.events.push({ t: 'gateOpen' }, { t: 'sfx', name: 'gate' });
         this.objectives.complete('bhop', this.events);
       }
-      // kart idles/coasts while you're on foot
-      stepKart(this.kart, null, this.staticBoxes(), dt);
+      stepKart(this.kart, null, this.staticBoxes(), dt, stats);
     } else {
-      stepKart(this.kart, intent, this.staticBoxes(), dt);
-      // ride along: keep look control, snap body to the seat
+      stepKart(this.kart, intent, this.staticBoxes(), dt, stats);
       p.yaw = intent.yaw;
       p.pitch = intent.pitch;
       p.pos.x = this.kart.pos.x;
@@ -159,20 +178,6 @@ export class World {
       case 'drop':
         this.dropCarried();
         break;
-      case 'solvePuzzle':
-        if (!this.puzzleSolved) {
-          this.puzzleSolved = true;
-          this.objectives.complete('puzzle', this.events);
-          this.events.push({ t: 'sfx', name: 'success' });
-        }
-        break;
-      case 'solveBolt':
-        if (!this.boltSolved) {
-          this.boltSolved = true;
-          this.objectives.complete('bolt', this.events);
-          this.events.push({ t: 'install' }, { t: 'sfx', name: 'install' });
-        }
-        break;
       case 'solveLore':
         if (!this.loreFound) {
           this.loreFound = true;
@@ -189,51 +194,54 @@ export class World {
   findInteract(): InteractTarget | null {
     const p = this.player;
     if (p.mode === 'kart') {
-      return { kind: 'enterKart', label: 'Exit kart', pos: { ...this.kart.pos } };
+      return { kind: 'enterKart', label: 'Exit vehicle', pos: { ...this.kart.pos } };
     }
 
     const eye = this.eyePos();
     const fwd = yawForward(p.yaw);
     const candidates: InteractTarget[] = [];
 
-    if (p.carrying === 'engine') {
-      if (!this.kart.engineInstalled) {
-        candidates.push({ kind: 'install', label: 'Install Engine Block', pos: { ...this.kart.pos } });
-      }
-    } else {
-      for (const it of this.items) {
-        if (it.picked) continue;
+    if (p.carrying && isPartKind(p.carrying)) {
+      const variant = p.carryingVariant ? variantById(p.carryingVariant) : undefined;
+      for (const s of openSockets(this.vehicle, p.carrying)) {
         candidates.push({
-          kind: 'pickup',
-          label: `Pick up ${ITEM_DEFS[it.kind].label}`,
-          pos: { ...it.pos },
+          kind: 'installPart',
+          label: `Install ${variant ? variant.name : ITEM_DEFS[p.carrying].label}`,
+          pos: this.socketWorldPos(s.anchor),
+          socketId: s.id,
+          variantId: p.carryingVariant ?? undefined,
         });
       }
-      if (!this.puzzleSolved) {
-        candidates.push({ kind: 'openPuzzle', label: 'Repair fuse panel', pos: { ...this.level.fusePos } });
+    } else if (!p.carrying) {
+      for (const it of this.items) {
+        if (it.picked) continue;
+        candidates.push({ kind: 'pickup', label: `Pick up ${ITEM_DEFS[it.kind].label}`, pos: { ...it.pos }, itemId: it.id });
       }
-      if (!this.boltSolved) {
-        candidates.push({ kind: 'openBolt', label: 'Torque engine-mount bolts', pos: { ...this.level.boltPos } });
+      candidates.push({ kind: 'paint', label: 'Repaint the body', pos: { ...this.level.paintPos } });
+      if (isDrivable(this.vehicle) && !this.kart.occupied) {
+        candidates.push({ kind: 'enterKart', label: 'Drive your build', pos: { ...this.kart.pos } });
       }
       if (!this.loreFound) {
         candidates.push({ kind: 'openLore', label: 'Inspect the sealed crate', pos: { ...this.level.lorePos } });
-      }
-      if (this.kart.engineInstalled && !this.kart.occupied) {
-        candidates.push({ kind: 'enterKart', label: 'Drive go-kart', pos: { ...this.kart.pos } });
       }
       if (this.objectives.readyToClockOut()) {
         candidates.push({ kind: 'clockIn', label: 'Clock out — finish', pos: { ...this.level.clockInPos } });
       }
     }
 
+    // Prefer what you're looking at: pick the best-aligned candidate (highest
+    // view dot), with distance only as a tie-breaker. Behaves like a crosshair.
     let best: InteractTarget | null = null;
+    let bestDot = INTERACT_CONE;
     let bestDist = Infinity;
     for (const c of candidates) {
       const d3 = Math.hypot(c.pos.x - eye.x, c.pos.y - eye.y, c.pos.z - eye.z);
       if (d3 > INTERACT_RANGE) continue;
       const dir = vnorm({ x: c.pos.x - eye.x, y: 0, z: c.pos.z - eye.z });
-      if (fwd.x * dir.x + fwd.z * dir.z < INTERACT_CONE) continue;
-      if (d3 < bestDist) {
+      const dot = fwd.x * dir.x + fwd.z * dir.z;
+      if (dot < INTERACT_CONE) continue;
+      if (dot > bestDot + 0.02 || (Math.abs(dot - bestDot) <= 0.02 && d3 < bestDist)) {
+        bestDot = dot;
         bestDist = d3;
         best = c;
       }
@@ -248,12 +256,13 @@ export class World {
 
     switch (target.kind) {
       case 'pickup': {
-        const it = this.nearestItem();
-        if (!it) return;
+        const it = this.items.find((i) => i.id === target.itemId);
+        if (!it || it.picked) return;
         it.picked = true;
         const def = ITEM_DEFS[it.kind];
         if (def.heavy) {
           p.carrying = it.kind;
+          p.carryingVariant = it.variantId ?? null;
         } else {
           const slot = p.hotbar.indexOf(null);
           if (slot !== -1) p.hotbar[slot] = it.kind;
@@ -262,18 +271,26 @@ export class World {
         if (it.kind === 'wrench') this.objectives.complete('pickup', this.events);
         break;
       }
-      case 'install':
-        this.kart.engineInstalled = true;
-        p.carrying = null;
-        this.events.push({ t: 'install' }, { t: 'sfx', name: 'install' });
-        this.objectives.complete('carry', this.events);
+      case 'installPart': {
+        if (!target.socketId || !target.variantId) return;
+        if (installPart(this.vehicle, target.socketId, target.variantId)) {
+          const kind = (p.carrying ?? 'engine') as ItemKind;
+          p.carrying = null;
+          p.carryingVariant = null;
+          this.events.push({ t: 'installPart', kind, variantId: target.variantId }, { t: 'sfx', name: 'install' });
+          if (isDrivable(this.vehicle) && !this.objectives.isDone('assemble')) {
+            this.objectives.complete('assemble', this.events);
+            this.events.push({ t: 'vehicleDrivable' });
+          }
+        }
         break;
-      case 'openPuzzle':
-        this.events.push({ t: 'openPuzzle' });
+      }
+      case 'paint': {
+        const i = (PAINT_PALETTE.indexOf(this.vehicle.bodyColor) + 1) % PAINT_PALETTE.length;
+        this.vehicle.bodyColor = PAINT_PALETTE[i];
+        this.events.push({ t: 'paint', color: this.vehicle.bodyColor }, { t: 'sfx', name: 'pickup' });
         break;
-      case 'openBolt':
-        this.events.push({ t: 'openBolt' });
-        break;
+      }
       case 'openLore':
         this.events.push({ t: 'openLore' });
         break;
@@ -301,7 +318,6 @@ export class World {
     p.mode = 'foot';
     this.kart.occupied = false;
     this.kart.speed = 0;
-    // step out to the left of the kart
     const fwd = yawForward(this.kart.heading);
     p.pos = { x: this.kart.pos.x - fwd.z * 2, y: 0, z: this.kart.pos.z + fwd.x * 2 };
     p.vel = { x: 0, y: 0, z: 0 };
@@ -311,7 +327,9 @@ export class World {
   private dropCarried(): void {
     const p = this.player;
     if (!p.carrying) return;
-    const it = this.items.find((i) => i.kind === p.carrying);
+    const it = this.items.find(
+      (i) => i.kind === p.carrying && i.variantId === (p.carryingVariant ?? undefined) && i.picked,
+    );
     if (it) {
       const fwd = yawForward(p.yaw);
       it.pos = { x: p.pos.x + fwd.x * 1.2, y: 0.6, z: p.pos.z + fwd.z * 1.2 };
@@ -319,21 +337,7 @@ export class World {
     }
     this.events.push({ t: 'drop', kind: p.carrying });
     p.carrying = null;
-  }
-
-  private nearestItem(): WorldItem | null {
-    const eye = this.eyePos();
-    let best: WorldItem | null = null;
-    let bestD = INTERACT_RANGE;
-    for (const it of this.items) {
-      if (it.picked) continue;
-      const d = Math.hypot(it.pos.x - eye.x, it.pos.y - eye.y, it.pos.z - eye.z);
-      if (d <= bestD) {
-        bestD = d;
-        best = it;
-      }
-    }
-    return best;
+    p.carryingVariant = null;
   }
 
   drainEvents(): SimEvent[] {

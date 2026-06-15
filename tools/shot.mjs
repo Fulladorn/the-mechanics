@@ -52,19 +52,9 @@ try {
     await page.screenshot({ path: `screenshots/${name}.png` });
   };
 
+  await page.evaluate(() => window.__mech?.openGate());
   await shot('02-spawn', 0, 15, 0, 0); // runway → gate
   await shot('03-exterior', 0, 16, Math.PI, -0.04); // back toward the open door + yard
-  await page.evaluate(() => window.__mech?.unlock()); // gate stays closed; open it
-  // bunny-hop to open the gate, then frame the workshop
-  await page.evaluate(async () => {
-    let yaw = 0;
-    for (let i = 0; i < 300; i++) {
-      yaw += 0.03;
-      window.__mech?.drive({ jump: true, sprint: true, right: true, yaw });
-      await new Promise((r) => requestAnimationFrame(r));
-    }
-    window.__mech?.stop();
-  });
   await shot('04-workshop', 0, -10.5, 0, -0.02); // kart bay + benches + hoist + terminal
   await shot('05-corner', -14, -15, Math.PI / 4, 0); // shelves/tires/barrels corner
 

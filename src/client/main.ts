@@ -3,6 +3,8 @@ import { World } from '../sim/world';
 import { DT } from '../shared/constants';
 import { ITEM_DEFS, makeIntent, type Intent } from '../shared/types';
 import { loadSettings, type Settings } from './settings';
+import { Dispatch } from './voice';
+import { DISPATCH } from '../content/narrative';
 import { horizontalSpeed } from '../sim/movement';
 import { GameView } from './render/view';
 import { Input } from './input';
@@ -27,6 +29,9 @@ let last = 0;
 let forceActive = false; // dev/test: step without pointer lock
 let debugIntent: Intent | null = null;
 let settings: Settings;
+let dispatch: Dispatch;
+let prevOnGround = true;
+let stepAccum = 0;
 
 function boot(): void {
   settings = loadSettings();
@@ -41,12 +46,16 @@ function boot(): void {
   input = new Input(app, world.player.yaw);
   hud = new Hud();
   puzzle = new PuzzleOverlay();
-  sfx = new Sfx();
+  sfx = new Sfx(settings);
+  dispatch = new Dispatch(settings);
 
   if (import.meta.env.DEV) {
     (window as unknown as { __mech: unknown }).__mech = {
       unlock: () => {
         forceActive = true;
+      },
+      openGate: () => {
+        world.gateOpen = true;
       },
       drive: (p: Partial<Intent>) => {
         const it = makeIntent();
@@ -86,6 +95,7 @@ function boot(): void {
 function start(): void {
   document.getElementById('start')!.classList.add('hidden');
   sfx.resume();
+  dispatch.say(DISPATCH.intro);
   app.requestPointerLock();
   running = true;
   last = performance.now();
@@ -103,6 +113,10 @@ function replay(): void {
   paused = false;
   won = false;
   acc = 0;
+  prevOnGround = true;
+  stepAccum = 0;
+  sfx.stopEngine();
+  dispatch.stop();
   sfx.resume();
   app.requestPointerLock();
   running = true;
@@ -129,6 +143,8 @@ function openPuzzle(): void {
 
 function onWin(): void {
   won = true;
+  sfx.stopEngine();
+  dispatch.say(DISPATCH.outro);
   document.exitPointerLock();
   const card = document.getElementById('win')!;
   const sub = card.querySelector('.sub') as HTMLElement;
@@ -158,6 +174,13 @@ function drainEvents(): void {
         break;
       case 'objectiveDone':
         hud.toast('Objective complete ✓');
+        dispatch.say(DISPATCH.objectives[e.id as keyof typeof DISPATCH.objectives] ?? '');
+        break;
+      case 'enterKart':
+        sfx.startEngine();
+        break;
+      case 'exitKart':
+        sfx.stopEngine();
         break;
       case 'install':
         hud.toast('Engine installed!');
@@ -193,6 +216,27 @@ function loop(now: number): void {
     }
     for (const c of input.drainCommands()) world.command(c);
     drainEvents();
+
+    // client-derived audio cues (sim stays untouched)
+    const pl = world.player;
+    if (pl.mode === 'foot') {
+      if (!prevOnGround && pl.onGround) sfx.play('land');
+      else if (prevOnGround && !pl.onGround) sfx.play('jump');
+      if (pl.onGround) {
+        const sp = Math.hypot(pl.vel.x, pl.vel.z);
+        if (sp > 2.5) {
+          stepAccum += sp * dt;
+          if (stepAccum > 2.2) {
+            sfx.play('footstep');
+            stepAccum = 0;
+          }
+        }
+      }
+      prevOnGround = pl.onGround;
+    } else {
+      sfx.updateEngine(world.kart.speed);
+      prevOnGround = true;
+    }
   } else {
     input.drainCommands(); // discard while frozen
   }

@@ -52,7 +52,7 @@ jobs:
             const phases = {};
             for (const issue of issues) {
               const phaseLabel = issue.labels.find(l => l.name.startsWith('phase:'));
-              const phase = phaseLabel ? phaseLabel.name : 'unlabelled';
+              const phase = phaseLabel ? phaseLabel.name : 'unlabeled';
               if (!phases[phase]) phases[phase] = [];
               phases[phase].push(issue);
             }

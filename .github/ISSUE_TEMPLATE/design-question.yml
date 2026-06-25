@@ -1,0 +1,72 @@
+name: Design Question
+description: An unresolved design decision that needs creator input before work can proceed.
+title: "[Design] "
+labels: ["design", "needs-decision"]
+body:
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Blocking phase
+      description: Which roadmap phase is blocked until this is resolved?
+      options:
+        - "P0 — Foundation"
+        - "P1 — Movement"
+        - "P2 — Multiplayer"
+        - "P3 — Interaction & Inventory"
+        - "P4 — Repair Core"
+        - "P5 — Drive Phase"
+        - "P6 — Survival & Combat"
+        - "P7 — Level 1 Mountains"
+        - "P8 — Level 2 Ocean"
+        - "P9 — Level 3 Moon"
+        - "P10 — Meta, UX & Voice"
+        - "P11 — Polish & Ship"
+        - "Not blocking — future consideration"
+    validations:
+      required: true
+
+  - type: textarea
+    id: question
+    attributes:
+      label: The question
+      description: State the unresolved design decision clearly in one or two sentences.
+      placeholder: "Should the wolf enemy be able to attack the player while they're inside the vehicle, or only during the repair/scavenge phase?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Why this needs a decision
+      description: >
+        What work is blocked or at risk without an answer? Reference the relevant
+        section of GAME_DESIGN.md or ROADMAP.md.
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered
+      description: >
+        List the viable options with a brief note on each tradeoff. The PM
+        agent or creator should fill this in.
+      placeholder: |
+        **Option A:** Wolf attacks vehicle — creates tension during the drive phase.
+        Risk: complicates the drive-phase scope, may feel unfair.
+
+        **Option B:** Wolf only harasses during repair — cleaner phase separation.
+        Risk: wolves become irrelevant once the drive starts.
+    validations:
+      required: false
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision (fill in when resolved)
+      description: >
+        Record the decision here and close the issue. Optionally link to the
+        task issue that implements the decision.
+      placeholder: "Decision: Option B. Wolves are repair/scavenge-phase threats only. Linked task: #XX"
+    validations:
+      required: false

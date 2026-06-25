@@ -1,0 +1,121 @@
+name: Task
+description: A PM-generated work item for a sub-agent or human contributor.
+title: "[Phase X] "
+labels: []
+body:
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Roadmap phase
+      description: Which phase does this task belong to?
+      options:
+        - "P0 — Foundation"
+        - "P1 — Movement"
+        - "P2 — Multiplayer"
+        - "P3 — Interaction & Inventory"
+        - "P4 — Repair Core"
+        - "P5 — Drive Phase"
+        - "P6 — Survival & Combat"
+        - "P7 — Level 1 Mountains"
+        - "P8 — Level 2 Ocean"
+        - "P9 — Level 3 Moon"
+        - "P10 — Meta, UX & Voice"
+        - "P11 — Polish & Ship"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Task type
+      options:
+        - feature
+        - bug
+        - test
+        - content
+        - design
+        - process
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - "p0 — blocking phase completion"
+        - "p1 — needed this week"
+        - "p2 — backlog"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Suggested agent
+      description: Which agent or person should handle this?
+      options:
+        - "@coder"
+        - "@test-writer"
+        - "@reviewer"
+        - "@level-designer"
+        - "human"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: >
+        One or two sentences connecting this task to a roadmap phase and design
+        pillar. Reference the relevant section of ROADMAP.md or GAME_DESIGN.md.
+    validations:
+      required: true
+
+  - type: textarea
+    id: deliverables
+    attributes:
+      label: What to build / change
+      description: >
+        Bullet list of concrete deliverables. Reference specific files/modules
+        where known (e.g. `src/sim/movement.ts`, `content/levels/mountains.ts`).
+      placeholder: |
+        - `src/sim/foo.ts` — add X
+        - `src/client/bar.ts` — wire Y to Z
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable, testable conditions. The PR is not mergeable until all boxes are checked.
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+        - [ ] Criterion 3
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests required
+      description: >
+        Which test file(s) should be added or updated? Reference the acceptance
+        criteria they cover. Leave blank only if this is a docs/config-only change.
+      placeholder: |
+        - `test/foo.test.ts` — covers criteria 1 and 2
+    validations:
+      required: false
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / open questions
+      description: >
+        Anything the assignee should know: related issues, design constraints,
+        tradeoffs, or questions that need answering before work starts.
+    validations:
+      required: false

@@ -1,3 +1,9 @@
+---
+agent: level-designer
+display_name: "Level Designer Agent"
+description: "Author mission LevelDef content and ensure design rules."
+---
+
 # Level Designer Agent — The Mechanics
 
 You are the **Level Designer** for *The Mechanics*. You author the TypeScript

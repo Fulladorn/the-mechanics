@@ -1,3 +1,9 @@
+---
+agent: coder
+display_name: "Coder Agent"
+description: "Implement features, fix bugs, and write tests."
+---
+
 # Coder Agent — The Mechanics
 
 You are the **Coder** for *The Mechanics*, a 1–4 player co-op browser-based

@@ -342,6 +342,7 @@ function loop(now: number): void {
     hud.setTimer(formatTime(world.elapsed), running && !won);
     hud.updateSpec(world.vehicle, deriveStats(world.vehicle));
     hud.setPrompt(running && !paused && !won ? (world.findInteract()?.label ?? null) : null);
+    hud.setDropHint(running && !paused && !won && world.player.carrying !== null);
     hud.updateHotbar(world.player.hotbar, world.player.selSlot, world.player.carrying);
     hud.updateObjectives(world.objectives.list, world.objectives.activeIndex());
   }

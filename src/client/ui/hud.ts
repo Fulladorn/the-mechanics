@@ -11,6 +11,7 @@ const byId = (id: string) => document.getElementById(id) as HTMLElement;
 export class Hud {
   private prompt = byId('prompt');
   private cross = byId('crosshair');
+  private dropHintEl = byId('drop-hint');
   private speedo = byId('speedo');
   private speedoVal = $('#speedo .val');
   private hotbar = byId('hotbar');
@@ -65,6 +66,10 @@ export class Hud {
       this.prompt.style.opacity = '0';
       this.cross.classList.remove('active');
     }
+  }
+
+  setDropHint(show: boolean): void {
+    this.dropHintEl.style.opacity = show ? '1' : '0';
   }
 
   setTimer(text: string, show: boolean): void {

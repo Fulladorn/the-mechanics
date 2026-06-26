@@ -220,14 +220,14 @@ export class GameView {
           metalness: 0.12,
         });
       } else if (s.tag === 'roof') {
-        const rx = s.box.half.x / 3;
-        const rz = s.box.half.z / 3;
+        const tilesX = s.box.half.x / 3;
+        const tilesZ = s.box.half.z / 3;
         const t = wallTex.clone();
         t.needsUpdate = true;
-        t.repeat.set(rx, rz);
+        t.repeat.set(tilesX, tilesZ);
         const n = wallNorm.clone();
         n.needsUpdate = true;
-        n.repeat.set(rx, rz);
+        n.repeat.set(tilesX, tilesZ);
         mat = new THREE.MeshStandardMaterial({
           map: t,
           normalMap: n,

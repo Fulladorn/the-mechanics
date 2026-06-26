@@ -46,6 +46,17 @@
         font-weight: 700; border-radius: 5px; padding: 1px 7px; margin-right: 7px;
       }
 
+      #drop-hint {
+        position: fixed; left: 50%; top: calc(58% + 44px); transform: translateX(-50%);
+        background: var(--panel); padding: 8px 14px; border-radius: 8px;
+        font-size: 15px; letter-spacing: 0.3px; opacity: 0; transition: opacity 0.1s;
+        border: 1px solid rgba(255,255,255,0.12);
+      }
+      #drop-hint .key {
+        display: inline-block; background: rgba(255,255,255,0.18); color: #fff;
+        font-weight: 700; border-radius: 5px; padding: 1px 7px; margin-right: 7px;
+      }
+
       #speedo {
         position: fixed; left: 50%; bottom: 92px; transform: translateX(-50%);
         text-align: center; font-variant-numeric: tabular-nums;
@@ -230,6 +241,7 @@
     <div id="hud">
       <div id="crosshair"></div>
       <div id="prompt"></div>
+      <div id="drop-hint"><span class="key">G</span>Drop</div>
       <div id="speedo"><div class="val">0.0</div><div class="unit">M/S</div></div>
       <div id="runtimer">0:00.0</div>
       <div id="hotbar"></div>

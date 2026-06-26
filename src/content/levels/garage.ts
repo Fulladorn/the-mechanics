@@ -18,6 +18,7 @@ export type SolidTag =
   | 'pallet'
   | 'terminal'
   | 'door'
+  | 'roof'
   | 'invisible';
 
 export interface Solid {
@@ -141,6 +142,8 @@ export function makeGarage(): GarageLevel {
     { box: slab(-12, 0, -6, 2.0, 1.1, 1.2), color: 0x6b7280, tag: 'cabinet' }, // bolt bench
     { box: slab(12, 0, -3, 1.8, 0.35, 1.8), color: 0x8a8f99, tag: 'pallet' },
     { box: slab(0, 0, -23, 2.2, 2.4, 0.7), color: 0x2f3a4d, tag: 'terminal' },
+    // roof slab — sits flush on top of the walls at y=6, sealing the building
+    { box: box(0, 6.25, -2, 28, 0.25, 22), color: 0x4a5568, tag: 'roof' },
   ];
 
   const props: Prop[] = [];

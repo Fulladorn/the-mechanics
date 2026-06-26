@@ -219,6 +219,24 @@ export class GameView {
           roughness: 0.85,
           metalness: 0.12,
         });
+      } else if (s.tag === 'roof') {
+        const rx = s.box.half.x / 3;
+        const rz = s.box.half.z / 3;
+        const t = wallTex.clone();
+        t.needsUpdate = true;
+        t.repeat.set(rx, rz);
+        const n = wallNorm.clone();
+        n.needsUpdate = true;
+        n.repeat.set(rx, rz);
+        mat = new THREE.MeshStandardMaterial({
+          map: t,
+          normalMap: n,
+          normalScale: new THREE.Vector2(0.4, 0.4),
+          color: s.color,
+          roughness: 0.9,
+          metalness: 0.08,
+          side: THREE.DoubleSide,
+        });
       } else if (s.tag === 'door') {
         mat = doorMat;
       } else {

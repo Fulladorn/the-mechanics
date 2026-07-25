@@ -11,6 +11,9 @@ export type Action =
   | 'sprint'
   | 'interact'
   | 'drop'
+  | 'attack'
+  | 'block'
+  | 'use'
   | 'pause'
   | 'slot1'
   | 'slot2'
@@ -29,6 +32,9 @@ export const DEFAULT_BINDS: Record<Action, string> = {
   sprint: 'ShiftLeft',
   interact: 'KeyE',
   drop: 'KeyG',
+  attack: 'Mouse0',
+  block: 'Mouse2',
+  use: 'KeyF',
   pause: 'Escape',
   slot1: 'Digit1',
   slot2: 'Digit2',
@@ -48,6 +54,9 @@ export const ACTION_LABELS: Record<Action, string> = {
   sprint: 'Sprint',
   interact: 'Interact / Pick up',
   drop: 'Drop carried',
+  attack: 'Swing / Use',
+  block: 'Block / Brace',
+  use: 'Use selected item',
   pause: 'Pause',
   slot1: 'Toolbelt 1',
   slot2: 'Toolbelt 2',
@@ -58,6 +67,9 @@ export const ACTION_LABELS: Record<Action, string> = {
 };
 
 const SPECIAL: Record<string, string> = {
+  Mouse0: 'LMB',
+  Mouse1: 'MMB',
+  Mouse2: 'RMB',
   Space: 'Space',
   ControlLeft: 'L-Ctrl',
   ControlRight: 'R-Ctrl',

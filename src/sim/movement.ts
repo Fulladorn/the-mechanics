@@ -16,7 +16,7 @@ import {
   STAND_HEIGHT,
   WALK_SPEED,
 } from '../shared/constants';
-import { playerMove, type Box } from './collision';
+import { playerMove, type Box, type GroundFn } from './collision';
 
 export interface Mover {
   pos: Vec3;
@@ -70,7 +70,13 @@ function airAccelerate(vel: Vec3, wx: number, wz: number, wishSpeed: number, dt:
  * Advance a mover one fixed step. Holding jump auto-hops on landing and skips
  * ground friction that tick, preserving (and, with strafing, building) speed.
  */
-export function stepMovement(p: Mover, intent: Intent, boxes: Box[], dt: number): void {
+export function stepMovement(
+  p: Mover,
+  intent: Intent,
+  boxes: Box[],
+  dt: number,
+  ground?: GroundFn,
+): void {
   p.yaw = intent.yaw;
   p.pitch = intent.pitch;
 
@@ -128,7 +134,7 @@ export function stepMovement(p: Mover, intent: Intent, boxes: Box[], dt: number)
     p.vel.z *= k;
   }
 
-  const res = playerMove(p.pos, p.vel, PLAYER_RADIUS, p.height, boxes, dt);
+  const res = playerMove(p.pos, p.vel, PLAYER_RADIUS, p.height, boxes, dt, ground);
   p.onGround = res.onGround;
 }
 

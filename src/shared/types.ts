@@ -5,6 +5,8 @@ import type { Vec3 } from './math';
 export type ItemKind =
   | 'wrench'
   | 'flashlight'
+  | 'medkit'
+  | 'flare'
   | 'wheel'
   | 'engine'
   | 'battery'
@@ -13,7 +15,12 @@ export type ItemKind =
   | 'bumper'
   | 'headlights'
   | 'spoiler'
-  | 'exhaust';
+  | 'exhaust'
+  | 'fuel'
+  | 'brakes'
+  | 'coolant'
+  | 'winch'
+  | 'rooflight';
 
 export interface ItemDef {
   kind: ItemKind;
@@ -25,6 +32,8 @@ export interface ItemDef {
 export const ITEM_DEFS: Record<ItemKind, ItemDef> = {
   wrench: { kind: 'wrench', label: 'Wrench', icon: '🔧', heavy: false },
   flashlight: { kind: 'flashlight', label: 'Flashlight', icon: '🔦', heavy: false },
+  medkit: { kind: 'medkit', label: 'Medkit', icon: '🩹', heavy: false },
+  flare: { kind: 'flare', label: 'Flare', icon: '🧨', heavy: false },
   wheel: { kind: 'wheel', label: 'Wheel', icon: '🛞', heavy: true },
   engine: { kind: 'engine', label: 'Engine', icon: '🛠️', heavy: true },
   battery: { kind: 'battery', label: 'Battery', icon: '🔋', heavy: false },
@@ -34,6 +43,11 @@ export const ITEM_DEFS: Record<ItemKind, ItemDef> = {
   headlights: { kind: 'headlights', label: 'Headlights', icon: '💡', heavy: false },
   spoiler: { kind: 'spoiler', label: 'Spoiler', icon: '🪽', heavy: true },
   exhaust: { kind: 'exhaust', label: 'Exhaust', icon: '💨', heavy: true },
+  fuel: { kind: 'fuel', label: 'Fuel Can', icon: '⛽', heavy: true },
+  brakes: { kind: 'brakes', label: 'Brakes', icon: '🛑', heavy: true },
+  coolant: { kind: 'coolant', label: 'Coolant Loop', icon: '💧', heavy: true },
+  winch: { kind: 'winch', label: 'Winch', icon: '⚓', heavy: true },
+  rooflight: { kind: 'rooflight', label: 'Roof Lights', icon: '🔆', heavy: true },
 };
 
 export interface WorldItem {
@@ -42,6 +56,8 @@ export interface WorldItem {
   pos: Vec3;
   picked: boolean;
   variantId?: string; // for part items: which PartVariant this pickup installs
+  /** Hidden until this objective completes (e.g. the cave reward). */
+  lockedUntil?: string;
 }
 
 /** Continuous per-tick input. Look angles are absolute (driven by the mouse). */
@@ -53,6 +69,8 @@ export interface Intent {
   jump: boolean;
   crouch: boolean;
   sprint: boolean;
+  /** RMB held: guard in combat, brace a held object. */
+  block: boolean;
   yaw: number;
   pitch: number;
 }
@@ -65,6 +83,7 @@ export const makeIntent = (): Intent => ({
   jump: false,
   crouch: false,
   sprint: false,
+  block: false,
   yaw: 0,
   pitch: 0,
 });
@@ -74,13 +93,34 @@ export type Command =
   | { t: 'interact' }
   | { t: 'drop' }
   | { t: 'slot'; n: number }
-  | { t: 'solveLore' };
+  | { t: 'attack' }
+  | { t: 'useItem' }
+  | { t: 'solveLore' }
+  | { t: 'solvePuzzle'; socketId: string };
+
+export type SfxName =
+  | 'pickup'
+  | 'install'
+  | 'success'
+  | 'gate'
+  | 'enter'
+  | 'win'
+  | 'repair'
+  | 'hurt'
+  | 'wolfGrowl'
+  | 'wolfBite'
+  | 'wolfDie'
+  | 'swing'
+  | 'crash'
+  | 'heal'
+  | 'fail';
 
 /** Things the sim emits each step for the client to turn into FX/SFX/UI. */
 export type SimEvent =
   | { t: 'pickup'; kind: ItemKind }
   | { t: 'drop'; kind: ItemKind }
   | { t: 'installPart'; kind: ItemKind; variantId: string }
+  | { t: 'uninstallPart'; kind: ItemKind }
   | { t: 'paint'; color: number }
   | { t: 'vehicleDrivable' }
   | { t: 'gateOpen' }
@@ -88,16 +128,42 @@ export type SimEvent =
   | { t: 'exitKart' }
   | { t: 'checkpoint'; index: number; total: number }
   | { t: 'openLore' }
+  | { t: 'openPuzzle'; socketId: string; puzzle: 'fuse' | 'bolt' | 'valve'; label: string }
+  | { t: 'repaired'; socketId: string }
   | { t: 'lore' }
   | { t: 'objectiveDone'; id: string }
+  | { t: 'damage'; amount: number; cause: string }
+  | { t: 'healed'; amount: number }
+  | { t: 'chocked' }
+  | { t: 'impact'; severity: number; pos: Vec3 }
+  | { t: 'wolf'; kind: 'notice' | 'telegraph' | 'lunge' | 'hit' | 'hurt' | 'died'; id: number; pos: Vec3 }
+  | { t: 'swing' }
   | { t: 'win' }
-  | { t: 'sfx'; name: 'pickup' | 'install' | 'success' | 'gate' | 'enter' | 'win' };
+  | { t: 'fail'; reason: 'downed' | 'vehicle' | 'creep' }
+  | { t: 'sfx'; name: SfxName };
+
+export type InteractKind =
+  | 'pickup'
+  | 'installPart'
+  | 'uninstallPart'
+  | 'repair'
+  | 'paint'
+  | 'openLore'
+  | 'chock'
+  | 'enterKart'
+  | 'clockIn';
 
 export interface InteractTarget {
-  kind: 'pickup' | 'installPart' | 'paint' | 'openLore' | 'enterKart' | 'clockIn';
+  kind: InteractKind;
   label: string;
   pos: Vec3;
+  /**
+   * Higher wins regardless of aim. Keeps "Drive" and "Repair" from being
+   * shadowed by the "Remove part" prompt on every socket of the same vehicle.
+   */
+  priority?: number;
   itemId?: number; // for pickup
-  socketId?: string; // for installPart
+  socketId?: string; // for installPart / uninstallPart / repair
   variantId?: string; // for installPart
+  stationId?: string; // for stations
 }

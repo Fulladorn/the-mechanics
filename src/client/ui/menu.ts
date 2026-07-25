@@ -5,6 +5,7 @@ import type { Input } from '../input';
 export interface MenuHooks {
   onResume: () => void;
   onRestart: () => void;
+  onQuit: () => void;
   apply: () => void; // push settings into view/audio/input/dispatch
 }
 
@@ -18,6 +19,9 @@ const REBINDABLE: Action[] = [
   'sprint',
   'interact',
   'drop',
+  'attack',
+  'block',
+  'use',
   'pause',
 ];
 
@@ -113,6 +117,7 @@ export class Menu {
       this.btn('Resume', () => this.hooks.onResume(), true),
       this.btn('Settings', () => this.openSettings(false)),
       this.btn('Restart Mission', () => this.hooks.onRestart()),
+      this.btn('Quit to Mission Select', () => this.hooks.onQuit()),
     );
     this.panel.appendChild(col);
   }

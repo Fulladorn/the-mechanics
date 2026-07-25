@@ -78,15 +78,16 @@ describe('garage full playthrough (headless)', () => {
     stopMoving(w);
 
     // 3. pick up the wrench
-    walkTo(w, lvl.wrenchPos);
-    interactWith(w, lvl.wrenchPos);
+    const wrench = lvl.items.find((i) => i.kind === 'wrench')!.pos;
+    walkTo(w, wrench);
+    interactWith(w, wrench);
     expect(w.player.hotbar).toContain('wrench');
     expect(w.objectives.isDone('pickup')).toBe(true);
 
     // 4. build the car: carry every required part to the chassis and bolt it on
     walkTo(w, { x: 0, y: 0, z: 4 }); // approach the gate gap from the south
     walkTo(w, { x: 0, y: 0, z: -4 }); // through to the north workshop
-    const origin = lvl.kartStart;
+    const origin = lvl.vehicleStart;
     for (const s of w.vehicle.sockets.filter((x) => x.required)) {
       const item = w.items.find((i) => i.kind === s.accepts && !i.picked);
       expect(item).toBeTruthy();
@@ -102,9 +103,9 @@ describe('garage full playthrough (headless)', () => {
     expect(w.objectives.isDone('assemble')).toBe(true);
 
     // 5. enter the vehicle and drive every checkpoint
-    interactWith(w, lvl.kartStart);
+    interactWith(w, lvl.vehicleStart);
     expect(w.player.mode).toBe('kart');
-    for (const cp of lvl.checkpoints) {
+    for (const cp of lvl.checkpoints!) {
       driveTo(w, cp);
     }
     expect(w.objectives.isDone('drive')).toBe(true);
@@ -112,8 +113,9 @@ describe('garage full playthrough (headless)', () => {
     // exit + 7. clock out
     w.command({ t: 'interact' }); // exit kart
     expect(w.player.mode).toBe('foot');
-    walkTo(w, lvl.clockInPos);
-    interactWith(w, lvl.clockInPos);
+    const clockOut = lvl.stations.find((st) => st.kind === 'clockOut')!.pos;
+    walkTo(w, clockOut);
+    interactWith(w, clockOut);
 
     expect(w.won).toBe(true);
     expect(w.objectives.allDone()).toBe(true);

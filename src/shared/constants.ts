@@ -8,6 +8,9 @@ export const PLAYER_RADIUS = 0.35;
 export const STAND_HEIGHT = 1.8;
 export const CROUCH_HEIGHT = 1.15;
 export const EYE_DROP = 0.18; // eye sits this far below the collider top
+// Ledges up to this high are walked over rather than blocking. Without it every
+// kerb, deck edge and rock on a terrain level is an invisible wall.
+export const STEP_HEIGHT = 0.62;
 
 // --- Movement feel (Quake/Source-style controller) ---
 export const GRAVITY = 22;

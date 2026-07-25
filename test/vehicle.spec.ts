@@ -23,7 +23,7 @@ const KINDS = Object.keys(PART_VARIANTS) as PartKind[];
 function buildBase() {
   const v = makeVehicle();
   for (const s of v.sockets) {
-    if (s.required) installPart(v, s.id, defaultVariant(s.accepts).id);
+    if (s.required) installPart(v, s.id, defaultVariant(s.accepts)!.id);
   }
   return v;
 }
@@ -49,7 +49,7 @@ describe('vehicle assembly', () => {
     expect(isDrivable(v)).toBe(false);
     for (const s of v.sockets.filter((x) => x.required)) {
       expect(isDrivable(v)).toBe(false); // still missing at least this one
-      installPart(v, s.id, defaultVariant(s.accepts).id);
+      installPart(v, s.id, defaultVariant(s.accepts)!.id);
     }
     expect(isDrivable(v)).toBe(true);
   });
@@ -57,7 +57,7 @@ describe('vehicle assembly', () => {
   it('cosmetic-only parts do not make it drivable', () => {
     const v = makeVehicle();
     for (const s of v.sockets.filter((x) => !x.required)) {
-      installPart(v, s.id, defaultVariant(s.accepts).id);
+      installPart(v, s.id, defaultVariant(s.accepts)!.id);
     }
     expect(isDrivable(v)).toBe(false);
   });
@@ -101,9 +101,9 @@ describe('vehicle stats', () => {
     const a = makeVehicle();
     const b = makeVehicle();
     const reqA = a.sockets.filter((s) => s.required);
-    for (const s of reqA) installPart(a, s.id, defaultVariant(s.accepts).id);
+    for (const s of reqA) installPart(a, s.id, defaultVariant(s.accepts)!.id);
     for (const s of [...b.sockets.filter((s) => s.required)].reverse())
-      installPart(b, s.id, defaultVariant(s.accepts).id);
+      installPart(b, s.id, defaultVariant(s.accepts)!.id);
     expect(deriveStats(a)).toEqual(deriveStats(b));
   });
 

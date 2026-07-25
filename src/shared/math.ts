@@ -31,6 +31,16 @@ export const clamp = (v: number, lo: number, hi: number): number =>
 
 export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 
+/** Hermite ease between two edges. Returns 0 below `lo`, 1 above `hi`. */
+export const smoothstep = (lo: number, hi: number, v: number): number => {
+  const t = clamp((v - lo) / (hi - lo || 1e-9), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+/** Move `a` towards `b` by at most `maxDelta`. */
+export const approach = (a: number, b: number, maxDelta: number): number =>
+  Math.abs(b - a) <= maxDelta ? b : a + Math.sign(b - a) * maxDelta;
+
 export const lerpAngle = (a: number, b: number, t: number): number => {
   let d = ((b - a + Math.PI) % (Math.PI * 2)) - Math.PI;
   if (d < -Math.PI) d += Math.PI * 2;

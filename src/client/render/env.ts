@@ -57,21 +57,23 @@ export const SKY_PRESETS: Record<string, SkyPreset> = {
   },
   /** Golden hour on the mountain — long shadows, amber key. */
   goldenHour: {
-    elevation: 11,
+    // Low warm sun raking across the mountain. Kept clear rather than hazy —
+    // heavy fog turned the whole range into milk.
+    elevation: 16,
     azimuth: 205,
-    turbidity: 6.5,
-    rayleigh: 2.6,
-    mieCoefficient: 0.009,
-    mieDirectionalG: 0.88,
-    sunColor: 0xffd9a0,
-    sunIntensity: 2.6,
-    skyColor: 0xb4cfe8,
-    groundColor: 0x5f5137,
-    hemiIntensity: 0.42,
-    fogColor: 0xd8c0a2,
-    fogNear: 60,
-    fogFar: 460,
-    envIntensity: 1.0,
+    turbidity: 3.4,
+    rayleigh: 2.2,
+    mieCoefficient: 0.006,
+    mieDirectionalG: 0.86,
+    sunColor: 0xffd6a0,
+    sunIntensity: 3.0,
+    skyColor: 0x9dbfe4,
+    groundColor: 0x63583c,
+    hemiIntensity: 0.4,
+    fogColor: 0xc9cfd6,
+    fogNear: 160,
+    fogFar: 900,
+    envIntensity: 0.75,
   },
 };
 

@@ -198,6 +198,22 @@ export function skyTexture(top = '#2a4a86', horizon = '#cfa86b'): THREE.Texture 
   return t;
 }
 
+/** Soft glowing disc for the sun billboard (also the god-ray source). */
+export function sunTexture(): THREE.Texture {
+  const { c, ctx } = makeCanvas(256);
+  const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.12, 'rgba(255,250,232,0.95)');
+  g.addColorStop(0.26, 'rgba(255,232,180,0.45)');
+  g.addColorStop(0.55, 'rgba(255,214,150,0.12)');
+  g.addColorStop(1, 'rgba(255,200,120,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 256, 256);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 /** Soft radial sprite used by the particle system. */
 export function sparkTexture(): THREE.Texture {
   const { c, ctx } = makeCanvas(64);
@@ -280,6 +296,63 @@ export function groundMacroTexture(): THREE.Texture {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.NoColorSpace;
   return t;
+}
+
+/**
+ * Neutral grain for surfaces that get their colour from vertex data. Stays
+ * close to white so it modulates brightness only — tinting it would fight the
+ * terrain's road/grass/rock/snow classification.
+ */
+export function detailTexture(): THREE.Texture {
+  const { c, ctx } = makeCanvas(256);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 3200; i++) {
+    const v = 200 + Math.floor(Math.random() * 46);
+    ctx.fillStyle = `rgba(${v},${v},${v},${0.25 + Math.random() * 0.4})`;
+    ctx.beginPath();
+    ctx.arc(Math.random() * 256, Math.random() * 256, 0.7 + Math.random() * 2.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // a few broader tonal patches to break up obvious tiling
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * 256;
+    const y = Math.random() * 256;
+    const r = 18 + Math.random() * 60;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, Math.random() > 0.5 ? 'rgba(228,228,228,0.5)' : 'rgba(255,255,255,0.5)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  return srgb(c);
+}
+
+/** Fine surface grain for the terrain — breaks up flat vertex-coloured ground. */
+export function groundNormalTexture(): THREE.Texture {
+  return normalMapFrom(
+    (ctx, s) => {
+      for (let i = 0; i < 900; i++) {
+        const v = Math.floor(90 + Math.random() * 90);
+        ctx.fillStyle = `rgb(${v},${v},${v})`;
+        ctx.beginPath();
+        ctx.arc(Math.random() * s, Math.random() * s, 1 + Math.random() * 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      for (let i = 0; i < 220; i++) {
+        ctx.strokeStyle = `rgba(200,200,200,${0.2 + Math.random() * 0.4})`;
+        ctx.lineWidth = 1 + Math.random() * 2;
+        const x = Math.random() * s;
+        const y = Math.random() * s;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + (Math.random() - 0.5) * 22, y + (Math.random() - 0.5) * 22);
+        ctx.stroke();
+      }
+    },
+    256,
+    1.1,
+  );
 }
 
 /** Soft puffy sprite for alpha-blended smoke and dust. */

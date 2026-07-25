@@ -3,9 +3,10 @@ import type { World } from '../../sim/world';
 import { ITEM_DEFS, type ItemKind } from '../../shared/types';
 import { variantById, type PartKind } from '../../sim/vehicle';
 import type { Settings } from '../settings';
-import { M, chrome, paint } from './materials';
-import { box, capsule, circle, cyl, roundedBox } from './geo';
+import { M, paint } from './materials';
+import { capsule, cyl, roundedBox } from './geo';
 import { makePart } from './vehicleMesh';
+import { makeTool } from './toolMesh';
 
 // First-person hands, held tools and carried parts, plus the motion that sells
 // them: bob, sway lag behind the mouse, strafe lean, and a landing dip. All of
@@ -67,34 +68,6 @@ function buildHand(sx: number): THREE.Group {
   return h;
 }
 
-function buildWrench(): THREE.Group {
-  const g = new THREE.Group();
-  const steel = chrome(0xc8d0dc);
-  g.add(mesh(roundedBox(0.07, 0.44, 0.048, 0.02), steel));
-  const head = mesh(roundedBox(0.19, 0.14, 0.052, 0.024), steel);
-  head.position.y = 0.26;
-  const jaw = mesh(box(0.07, 0.085, 0.066), steel);
-  jaw.position.set(0.052, 0.315, 0);
-  const grip = mesh(roundedBox(0.076, 0.19, 0.052, 0.024), M.rubber(0xd14b3a));
-  grip.position.y = -0.05;
-  g.add(head, jaw, grip);
-  return g;
-}
-
-function buildFlashlight(): THREE.Group {
-  const g = new THREE.Group();
-  g.add(mesh(cyl(0.058, 0.065, 0.28, 14), M.painted(0xffcf3f, 0.42)));
-  const head = mesh(cyl(0.095, 0.066, 0.1, 14), M.darkSteel());
-  head.position.y = 0.18;
-  const lens = mesh(circle(0.084, 14), M.glow(0xfff1c0, 2.4));
-  lens.rotation.x = -Math.PI / 2;
-  lens.position.y = 0.232;
-  const knurl = mesh(cyl(0.06, 0.06, 0.06, 14), M.rubber(0x2a2f38));
-  knurl.position.y = -0.05;
-  g.add(head, lens, knurl);
-  return g;
-}
-
 export class Viewmodel {
   private pivot = new THREE.Group();
   private hands = new THREE.Group();
@@ -126,11 +99,9 @@ export class Viewmodel {
     this.heldPart.visible = false;
     this.pivot.add(this.heldPart);
 
-    for (const [kind, make] of [
-      ['wrench', buildWrench],
-      ['flashlight', buildFlashlight],
-    ] as [ItemKind, () => THREE.Group][]) {
-      const tool = make();
+    for (const kind of ['wrench', 'flashlight', 'medkit', 'flare'] as ItemKind[]) {
+      const tool = makeTool(kind);
+      if (!tool) continue;
       tool.scale.setScalar(0.85);
       tool.position.set(0.27, -0.29, -0.5);
       tool.rotation.set(0.32, -0.3, 0.22);

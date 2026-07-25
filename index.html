@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="data:," />
-    <title>The Mechanics — Garage (Training)</title>
+    <title>The Mechanics</title>
     <style>
       :root {
         --accent: #ffcf3f;
@@ -187,7 +187,7 @@
       #subtitles.show { opacity: 1; }
 
       #runtimer {
-        position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+        position: fixed; top: 52px; left: 50%; transform: translateX(-50%);
         font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 700;
         color: #cdd5e0; opacity: 0; transition: opacity 0.2s; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
       }
@@ -212,6 +212,156 @@
       .spec-bar .bar { flex: 1; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; }
       .spec-bar .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); }
 
+      /* ---------- Vitals / compass / damage ---------- */
+      #vitals {
+        position: fixed; left: 18px; bottom: 22px; width: 210px;
+        background: var(--panel); border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 10px; padding: 10px 12px; font-size: 11px;
+      }
+      #vitals .row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+      #vitals .row > span { width: 34px; letter-spacing: 1px; opacity: 0.7; }
+      #vitals .row > b { width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+      #vitals .bar { flex: 1; height: 7px; background: rgba(255,255,255,0.12); border-radius: 4px; overflow: hidden; }
+      #vitals .bar i { display: block; height: 100%; width: 100%; background: #4fd97e; transition: width 0.15s; }
+      #vitals .cold .bar i { background: linear-gradient(90deg, #6fb6ff, #cfe6ff); }
+      #vitals .cold.warn { animation: pulseWarn 1s infinite; }
+      #vitals .cold.warming > span::after { content: " 🔥"; }
+      #vitals .integ.warn { animation: pulseWarn 1.4s infinite; }
+      @keyframes pulseWarn { 50% { opacity: 0.45; } }
+
+      #compass {
+        position: fixed; left: 50%; top: 16px; transform: translateX(-50%);
+        width: 320px; opacity: 0; transition: opacity 0.2s; text-align: center;
+      }
+      #compass.show { opacity: 0.92; }
+      #compass .track {
+        position: relative; height: 16px;
+        background: linear-gradient(90deg, rgba(16,20,28,0) 0%, rgba(16,20,28,0.75) 20%, rgba(16,20,28,0.75) 80%, rgba(16,20,28,0) 100%);
+        border-radius: 8px;
+      }
+      #compass .needle {
+        position: absolute; left: 50%; top: -2px; font-size: 15px; color: var(--accent);
+        text-shadow: 0 1px 4px rgba(0,0,0,0.8); transition: transform 0.08s linear;
+      }
+      #compass .needle.behind { color: #8794a8; }
+      #compass .dist { font-size: 11px; letter-spacing: 1px; opacity: 0.75; margin-top: 2px; }
+
+      #damage-fx {
+        position: fixed; inset: 0; pointer-events: none; opacity: 0;
+        transition: opacity 0.22s; z-index: 15;
+        box-shadow: inset 0 0 160px 40px rgba(200, 30, 30, 0.75);
+      }
+      #damage-fx.show { opacity: 1; }
+      #damage-fx.cold { box-shadow: inset 0 0 160px 40px rgba(90, 160, 235, 0.7); }
+
+      /* colourblind mode: lean on the glyphs the HUD already emits */
+      #hud.cb .spec-row span:last-child { font-weight: 700; }
+
+      /* ---------- Shell screens (menu / results / fail) ---------- */
+      .shell-card {
+        width: 640px; max-width: 94vw; max-height: 88vh; overflow-y: auto;
+        background: linear-gradient(160deg, #182030, #0d131d);
+        border: 1px solid rgba(255,255,255,0.12); border-radius: 18px;
+        padding: 34px 38px; pointer-events: auto; text-align: center;
+      }
+      .shell-title {
+        font-size: 38px; letter-spacing: 2px; margin-bottom: 6px;
+        background: linear-gradient(90deg, var(--accent), var(--accent2));
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .shell-title.fail {
+        background: linear-gradient(90deg, #ff7a6b, #ff5d5d);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .shell-tag { opacity: 0.72; font-size: 14px; margin-bottom: 22px; line-height: 1.5; }
+      .shell-note { font-size: 12px; opacity: 0.7; margin: 14px 0 0; color: var(--accent2); }
+      .shell-unlock {
+        margin: 16px 0 0; font-size: 15px; color: var(--accent);
+        border: 1px dashed rgba(255,207,63,0.5); border-radius: 10px; padding: 10px;
+      }
+      .shell-actions { display: flex; gap: 10px; justify-content: center; margin-top: 24px; flex-wrap: wrap; }
+      .shell-controls {
+        margin-top: 22px; font-size: 11px; opacity: 0.5; line-height: 1.9;
+        border-top: 1px solid rgba(255,255,255,0.09); padding-top: 14px;
+      }
+      .shell-controls b { color: var(--accent); font-weight: 700; }
+
+      .mission-list { display: flex; flex-direction: column; gap: 12px; text-align: left; }
+      .mission {
+        background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 12px; padding: 14px 16px; cursor: pointer; color: inherit;
+        font: inherit; text-align: left; transition: border-color 0.12s, transform 0.06s, background 0.12s;
+      }
+      .mission:hover { border-color: var(--accent); background: rgba(255,255,255,0.09); transform: translateY(-1px); }
+      .mission.locked { opacity: 0.45; cursor: not-allowed; }
+      .mission.locked:hover { border-color: rgba(255,255,255,0.12); transform: none; background: rgba(255,255,255,0.05); }
+      .mission-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+      .mission-name { font-size: 18px; font-weight: 700; }
+      .mission-badge { font-size: 10px; letter-spacing: 1.5px; opacity: 0.7; white-space: nowrap; }
+      .mission.done .mission-badge { color: var(--accent2); opacity: 1; }
+      .mission-blurb { font-size: 13px; opacity: 0.7; margin-top: 5px; line-height: 1.45; }
+      .mission-stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; opacity: 0.72; margin-top: 8px; }
+      .mission-stats .lore-yes { color: var(--accent2); opacity: 1; }
+
+      .result-rows { display: flex; flex-direction: column; gap: 2px; text-align: left; margin: 0 auto; max-width: 380px; }
+      .result-row {
+        display: flex; justify-content: space-between; gap: 14px; font-size: 14px;
+        padding: 9px 4px; border-bottom: 1px solid rgba(255,255,255,0.07);
+      }
+      .result-row b { font-variant-numeric: tabular-nums; }
+      .result-row.best b { color: var(--accent); }
+
+      /* ---------- Puzzle overlays ---------- */
+      .puzzle-panel {
+        background: linear-gradient(160deg, #1a2231, #10161f);
+        border: 1px solid rgba(255,255,255,0.14); border-radius: 16px;
+        padding: 26px 34px; width: 420px; max-width: 92vw; text-align: center;
+        transition: border-color 0.2s;
+      }
+      .puzzle-panel.solved { border-color: var(--accent2); box-shadow: 0 0 40px rgba(56,224,200,0.25); }
+      .puzzle-title { font-size: 20px; letter-spacing: 1px; color: var(--accent2); margin-bottom: 4px; }
+      .puzzle-blurb { opacity: 0.7; font-size: 13px; margin-bottom: 16px; }
+      .puzzle-hint { margin-top: 16px; font-size: 11px; opacity: 0.5; }
+      .puzzle-count { margin-top: 12px; font-size: 12px; letter-spacing: 1px; opacity: 0.8; min-height: 16px; }
+
+      .fuse-grid { display: grid; gap: 10px; justify-content: center; }
+      .fuse-cell {
+        width: 64px; height: 64px; border-radius: 10px; cursor: pointer;
+        border: 2px solid rgba(255,255,255,0.18); background: #1a2230; color: #55617a;
+        font-size: 22px; transition: background 0.1s, box-shadow 0.1s;
+      }
+      .fuse-cell.on { background: #38e0c8; color: #06251f; box-shadow: 0 0 14px rgba(56,224,200,0.55); }
+
+      .bolt-row { display: flex; gap: 10px; justify-content: center; margin-bottom: 18px; }
+      .bolt-pip {
+        width: 42px; height: 42px; border-radius: 50%; cursor: pointer; font-weight: 700;
+        border: 2px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.06); color: #cdd5e0;
+      }
+      .bolt-pip.active { border-color: var(--accent); color: var(--accent); }
+      .bolt-pip.done { background: var(--accent2); border-color: var(--accent2); color: #06251f; cursor: default; }
+      .torque-gauge {
+        position: relative; height: 26px; border-radius: 13px; overflow: hidden;
+        background: rgba(255,255,255,0.09); border: 1px solid rgba(255,255,255,0.16);
+      }
+      .torque-band { position: absolute; top: 0; bottom: 0; background: rgba(56,224,200,0.32); border-left: 2px solid rgba(56,224,200,0.8); border-right: 2px solid rgba(56,224,200,0.8); }
+      .torque-fill { position: absolute; left: 0; top: 0; bottom: 0; background: #8794a8; opacity: 0.85; }
+      .torque-needle { position: absolute; top: -3px; bottom: -3px; width: 3px; background: #fff; box-shadow: 0 0 6px rgba(255,255,255,0.9); }
+      .torque-readout { margin-top: 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+      .valve-gauges { display: flex; flex-direction: column; gap: 9px; margin-bottom: 18px; }
+      .valve-gauge { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+      .valve-gauge > span { width: 74px; text-align: left; font-weight: 700; }
+      .valve-bar {
+        position: relative; flex: 1; height: 16px; border-radius: 8px;
+        background: rgba(255,255,255,0.09); border: 1px solid rgba(255,255,255,0.16); overflow: hidden;
+      }
+      .valve-safe { position: absolute; top: 0; bottom: 0; background: rgba(56,224,200,0.3); border-left: 2px solid rgba(56,224,200,0.75); border-right: 2px solid rgba(56,224,200,0.75); }
+      .valve-mark { position: absolute; top: -2px; bottom: -2px; width: 4px; border-radius: 2px; }
+      .valve-sliders { display: flex; flex-direction: column; gap: 8px; }
+      .valve-slider { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+      .valve-slider > span { width: 74px; text-align: left; opacity: 0.75; }
+      .valve-slider input { flex: 1; accent-color: var(--accent); }
+
       #loading {
         position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column;
         align-items: center; justify-content: center; background: #0b0e14; gap: 18px;
@@ -233,41 +383,21 @@
       <div id="speedo"><div class="val">0.0</div><div class="unit">M/S</div></div>
       <div id="runtimer">0:00.0</div>
       <div id="hotbar"></div>
-      <div id="objectives"><h3>Training Checklist</h3><ul></ul></div>
-      <div id="specsheet"><h3>Your Build</h3><div class="spec-parts"></div><div class="spec-stats"></div></div>
+      <div id="objectives"><h3>Objectives</h3><ul></ul></div>
+      <div id="specsheet"><h3>Repair Checklist</h3><div class="spec-parts"></div><div class="spec-stats"></div></div>
+      <div id="vitals">
+        <div class="row hp"><span>HP</span><div class="bar"><i></i></div><b>100</b></div>
+        <div class="row cold"><span>COLD</span><div class="bar"><i></i></div><b></b></div>
+        <div class="row integ"><span>RIG</span><div class="bar"><i></i></div><b>100%</b></div>
+      </div>
+      <div id="compass"><div class="track"><span class="needle">▼</span></div><div class="dist"></div></div>
+      <div id="damage-fx"></div>
     </div>
 
     <div id="toast"></div>
     <div id="subtitles"></div>
 
-    <div id="loading"><div class="spin"></div><div class="msg">PREPARING GARAGE…</div></div>
-
-    <div id="start" class="overlay hidden">
-      <div id="start-card">
-        <h1>THE MECHANICS</h1>
-        <div class="tag">Training Bay — learn the ropes before deployment.</div>
-        <div class="controls-grid">
-          <span class="k">W A S D</span><span>Move</span>
-          <span class="k">Mouse</span><span>Look</span>
-          <span class="k">Space</span><span>Jump — hold to bunny-hop &amp; build speed</span>
-          <span class="k">Ctrl</span><span>Crouch (crouch-jump)</span>
-          <span class="k">Shift</span><span>Sprint</span>
-          <span class="k">E</span><span>Interact / pick up / enter</span>
-          <span class="k">G</span><span>Drop carried part</span>
-          <span class="k">1–6 / Scroll</span><span>Select toolbelt slot</span>
-        </div>
-        <button class="btn" id="start-btn">CLOCK IN ▶</button>
-        <button class="btn btn-ghost" id="settings-btn" style="margin-top: 10px">Settings</button>
-      </div>
-    </div>
-
-    <div id="win" class="overlay hidden">
-      <div id="win-card">
-        <h1>TRAINING COMPLETE</h1>
-        <div class="sub"></div>
-        <button class="btn" id="win-btn">RUN IT BACK</button>
-      </div>
-    </div>
+    <div id="loading"><div class="spin"></div><div class="msg">PREPARING…</div></div>
 
     <script type="module" src="/src/client/main.ts"></script>
   </body>

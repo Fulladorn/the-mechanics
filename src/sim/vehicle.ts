@@ -19,7 +19,15 @@ export type PartKind =
   | 'bumper'
   | 'headlights'
   | 'spoiler'
-  | 'exhaust';
+  | 'exhaust'
+  | 'fuel'
+  | 'brakes'
+  | 'coolant'
+  | 'winch'
+  | 'rooflight';
+
+/** Which diegetic minigame repairs a broken system. */
+export type PuzzleKind = 'fuse' | 'bolt' | 'valve';
 
 export interface StatDelta {
   topSpeed: number;
@@ -43,7 +51,20 @@ export interface Socket {
   required: boolean;
   anchor: Vec3; // local offset on the chassis (chassis faces -Z, like the kart)
   installed: string | null; // PartVariant.id
+  /**
+   * Non-null when a part *is* fitted but faulty: the system reads BROKEN and is
+   * cleared by solving this puzzle rather than by carrying a replacement.
+   */
+  broken?: PuzzleKind | null;
+  /** Human label for the repair checklist; falls back to the item label. */
+  label?: string;
 }
+
+/** GDD system states: a socket is one of these at any moment. */
+export type SystemState = 'MISSING' | 'BROKEN' | 'GO';
+
+export const socketState = (s: Socket): SystemState =>
+  s.installed === null ? 'MISSING' : s.broken ? 'BROKEN' : 'GO';
 
 export interface Vehicle {
   sockets: Socket[];
@@ -104,6 +125,12 @@ export const PART_VARIANTS: Record<PartKind, PartVariant[]> = {
   exhaust: [
     { id: 'exhaust.sport', kind: 'exhaust', name: 'Sport Exhaust', stats: d(1, 0.5, 0, 0), render: { color: 0x9aa0aa } },
   ],
+  // --- field-repair systems (Mountains and later missions) ---
+  fuel: [{ id: 'fuel.can', kind: 'fuel', name: 'Fuel Line & Can', stats: d(), render: { color: 0xd14b3a } }],
+  brakes: [{ id: 'brakes.std', kind: 'brakes', name: 'Brake Assembly', stats: d(0, 0, 0.08, 0), render: { color: 0x8a8f99 } }],
+  coolant: [{ id: 'coolant.std', kind: 'coolant', name: 'Coolant Loop', stats: d(), render: { color: 0x2f9fd1 } }],
+  winch: [{ id: 'winch.std', kind: 'winch', name: 'Recovery Winch', stats: d(-0.5, 0, 0, 0.25), render: { color: 0xffb020 } }],
+  rooflight: [{ id: 'rooflight.bar', kind: 'rooflight', name: 'Roof Light Bar', stats: d(), render: { color: 0xfff2c8 } }],
 };
 
 const variantMap: Map<string, PartVariant> = (() => {
@@ -113,9 +140,24 @@ const variantMap: Map<string, PartVariant> = (() => {
 })();
 
 export const variantById = (id: string): PartVariant | undefined => variantMap.get(id);
-export const defaultVariant = (kind: PartKind): PartVariant => PART_VARIANTS[kind][0];
+/** First variant of a kind, or undefined if the kind isn't a vehicle part. */
+export const defaultVariant = (kind: PartKind): PartVariant | undefined => PART_VARIANTS[kind]?.[0];
 
-export function makeVehicle(): Vehicle {
+/** The Garage's build-your-own chassis: every socket starts empty. */
+export function makeVehicle(sockets?: Socket[]): Vehicle {
+  return {
+    sockets: sockets ? sockets.map((s) => ({ ...s, anchor: { ...s.anchor } })) : defaultSockets(),
+    bodyColor: 0xe5484d,
+    baseStats: {
+      topSpeed: VEHICLE_BASE_TOPSPEED,
+      accel: VEHICLE_BASE_ACCEL,
+      grip: VEHICLE_BASE_GRIP,
+      durability: VEHICLE_BASE_DURABILITY,
+    },
+  };
+}
+
+function defaultSockets(): Socket[] {
   const sockets: Socket[] = [
     { id: 'wheelFL', accepts: 'wheel', required: true, anchor: { x: -0.85, y: 0.4, z: -0.85 }, installed: null },
     { id: 'wheelFR', accepts: 'wheel', required: true, anchor: { x: 0.85, y: 0.4, z: -0.85 }, installed: null },
@@ -130,21 +172,22 @@ export function makeVehicle(): Vehicle {
     { id: 'spoiler', accepts: 'spoiler', required: false, anchor: { x: 0, y: 0.95, z: 1.2 }, installed: null },
     { id: 'exhaust', accepts: 'exhaust', required: false, anchor: { x: 0.5, y: 0.22, z: 1.25 }, installed: null },
   ];
-  return {
-    sockets,
-    bodyColor: 0xe5484d,
-    baseStats: {
-      topSpeed: VEHICLE_BASE_TOPSPEED,
-      accel: VEHICLE_BASE_ACCEL,
-      grip: VEHICLE_BASE_GRIP,
-      durability: VEHICLE_BASE_DURABILITY,
-    },
-  };
+  return sockets;
 }
 
 /** Open sockets that accept a part kind (the client picks the nearest by world pos). */
 export function openSockets(v: Vehicle, kind: PartKind): Socket[] {
   return v.sockets.filter((s) => s.accepts === kind && s.installed === null);
+}
+
+/** Filled sockets of a kind — the ones you can swap a carried part into. */
+export function filledSockets(v: Vehicle, kind: PartKind): Socket[] {
+  return v.sockets.filter((s) => s.accepts === kind && s.installed !== null);
+}
+
+/** Sockets that are fitted but faulty, i.e. waiting on a repair puzzle. */
+export function brokenSockets(v: Vehicle): Socket[] {
+  return v.sockets.filter((s) => s.installed !== null && !!s.broken);
 }
 
 export function socketById(v: Vehicle, id: string): Socket | undefined {
@@ -161,11 +204,28 @@ export function installPart(v: Vehicle, socketId: string, variantId: string): bo
   return true;
 }
 
+/** Pull a part back out of a socket. Returns the variant that came out. */
+export function uninstallPart(v: Vehicle, socketId: string): string | null {
+  const s = socketById(v, socketId);
+  if (!s || s.installed === null || s.broken) return null;
+  const was = s.installed;
+  s.installed = null;
+  return was;
+}
+
+/** Clear a socket's fault (the repair puzzle was solved). */
+export function repairSocket(v: Vehicle, socketId: string): boolean {
+  const s = socketById(v, socketId);
+  if (!s || !s.broken) return false;
+  s.broken = null;
+  return true;
+}
+
 export const isDrivable = (v: Vehicle): boolean =>
-  v.sockets.every((s) => !s.required || s.installed !== null);
+  v.sockets.every((s) => !s.required || (s.installed !== null && !s.broken));
 
 export const requiredRemaining = (v: Vehicle): PartKind[] =>
-  v.sockets.filter((s) => s.required && s.installed === null).map((s) => s.accepts);
+  v.sockets.filter((s) => s.required && (s.installed === null || s.broken)).map((s) => s.accepts);
 
 const clampStats = (s: VehicleStats): VehicleStats => ({
   topSpeed: Math.max(6, s.topSpeed),

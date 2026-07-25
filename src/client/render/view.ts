@@ -3,7 +3,7 @@ import { lerp, lerpAngle, type Vec3 } from '../../shared/math';
 import { CHECKPOINT_RADIUS } from '../../shared/constants';
 import type { World } from '../../sim/world';
 import { type ItemKind } from '../../shared/types';
-import { chevronTexture, stripeTexture } from './textures';
+import { chevronTexture, detailTexture, groundNormalTexture, stripeTexture } from './textures';
 import type { Settings } from '../settings';
 import { isDrivable, variantById, defaultVariant, type PartKind } from '../../sim/vehicle';
 import { Post } from './post';
@@ -14,6 +14,8 @@ import { box, circle, cyl, plane, roundedBox, torus } from './geo';
 import { ANIMATED_KINDS, INSTANCED_KINDS, makeProp } from './props';
 import { SKY_PRESETS, SkyRig, lightShaft } from './env';
 import { makeChassis, makePart } from './vehicleMesh';
+import { makeWolfMesh } from './wolfMesh';
+import { makeTool } from './toolMesh';
 
 const disposeTree = (o: THREE.Object3D): void => {
   o.traverse((c) => {
@@ -24,6 +26,9 @@ const disposeTree = (o: THREE.Object3D): void => {
     }
   });
 };
+
+const TMP_ROCK = new THREE.Color(0x6d6860);
+const TMP_SNOW = new THREE.Color(0xe9eef7);
 
 interface Animated {
   o: THREE.Object3D;
@@ -39,7 +44,7 @@ export class GameView {
   private world: World;
 
   private sky!: SkyRig;
-  private gateMesh!: THREE.Mesh;
+  private gateMesh?: THREE.Mesh;
   private gateAnim = 0;
   private itemMeshes = new Map<number, THREE.Object3D>();
   private kartGroup!: THREE.Group;
@@ -48,7 +53,7 @@ export class GameView {
   private bodyMats: THREE.MeshPhysicalMaterial[] = [];
   private lastBodyColor = -1;
   private checkpointMeshes: THREE.Mesh[] = [];
-  private clockScreen!: THREE.Mesh;
+  private clockScreen?: THREE.Mesh;
   private settings: Settings;
   private post!: Post;
   private particles!: Particles;
@@ -61,6 +66,8 @@ export class GameView {
   private weldLight?: THREE.PointLight;
   private wheelSpin = 0;
   private headlampsOn = false;
+  private exfilMesh?: THREE.Group;
+  private wolfMeshes = new Map<number, THREE.Group>();
 
   // interpolation state
   private prevEye: Vec3;
@@ -85,7 +92,9 @@ export class GameView {
     container.appendChild(this.renderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(settings.video.fov, innerWidth / innerHeight, 0.05, 900);
+    // Outdoor missions need a far plane past the whole mountain + backdrop.
+    const far = world.level.terrain ? 2600 : 900;
+    this.camera = new THREE.PerspectiveCamera(settings.video.fov, innerWidth / innerHeight, 0.05, far);
     this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
 
@@ -97,6 +106,7 @@ export class GameView {
     });
 
     this.buildGround();
+    this.buildTerrain();
     this.buildStatics();
     this.buildShell();
     this.buildInteriorLights();
@@ -107,10 +117,13 @@ export class GameView {
     this.buildVehicle();
     this.buildCheckpoints();
     this.buildClockIn();
+    this.buildExfil();
+    this.buildWolves();
 
     this.particles = new Particles(this.scene, q);
     this.vm = new Viewmodel(this.camera);
     this.post = new Post(this.renderer, this.scene, this.camera, q, settings.video.postfx, this.sky.sun);
+    this.post.setExposure(settings.video.brightness);
 
     const eye = world.eyePos();
     this.prevEye = { ...eye };
@@ -144,7 +157,180 @@ export class GameView {
 
   // --- world shell ----------------------------------------------------------
 
+  /**
+   * Heightfield mesh built by sampling the *same* Terrain the sim collides
+   * against, so visual and physical ground can never drift apart. Surface type
+   * is baked into vertex colours (road / grass / rock / snow), which keeps the
+   * whole mountain to one draw call.
+   */
+  private buildTerrain(): void {
+    const t = this.world.terrain;
+    if (!t) return;
+    const q = this.settings.video.quality;
+    // Vertex colours alone read as smooth plastic at close range; a tiled grain
+    // + normal map gives the ground surface texture without touching the
+    // per-vertex surface classification.
+    const grain = detailTexture();
+    grain.repeat.set(120, 120);
+    const grainN = groundNormalTexture();
+    grainN.repeat.set(140, 140);
+    const mat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      map: grain,
+      normalMap: grainN,
+      normalScale: new THREE.Vector2(0.65, 0.65),
+      roughness: 0.97,
+      metalness: 0.02,
+    });
+
+    // A uniform grid fine enough to resolve an 11 m road would be ~500k tris of
+    // mostly-empty mountainside. Instead: a coarse grid for the bulk, with the
+    // quads under the road punched out, plus a dense ribbon that follows the
+    // road spiral — detail exactly where the player actually is.
+    const RIBBON_HALF = 24;
+    this.add(this.buildTerrainBulk(t, mat, RIBBON_HALF - 3, q));
+    this.add(this.buildRoadRibbon(t, mat, RIBBON_HALF, q));
+  }
+
+  /** Surface colour for a point: road, verge, grass, rock or snow. */
+  private terrainColor(t: NonNullable<World['terrain']>, x: number, z: number, h: number, out: THREE.Color): void {
+    const hit = t.roadAt(x, z);
+    const half = t.def.road.halfWidth;
+    if (hit.dist <= half - 0.4) {
+      out.setHex(0x55514c);
+      // subtle wheel-polish down the centre of each lane
+      if (Math.abs(hit.dist - half * 0.45) < 0.9) out.offsetHSL(0, 0, 0.035);
+    } else if (hit.dist <= half + 2.2) {
+      out.setHex(0x7d6a45); // gravel verge
+    } else {
+      const slope = t.slopeAt(x, z);
+      out.setHex(0x5f8340);
+      out.lerp(TMP_ROCK, THREE.MathUtils.clamp((slope - 0.08) / 0.22, 0, 1));
+      if (h > 46) out.lerp(TMP_SNOW, THREE.MathUtils.clamp((h - 46) / 12, 0, 1));
+    }
+  }
+
+  private buildTerrainBulk(
+    t: NonNullable<World['terrain']>,
+    mat: THREE.Material,
+    punchDist: number,
+    q: string,
+  ): THREE.Mesh {
+    const b = this.world.level.bounds;
+    const size = Math.max(b.maxX - b.minX, b.maxZ - b.minZ);
+    const seg = q === 'high' ? 200 : q === 'med' ? 148 : 104;
+    const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+    geo.rotateX(-Math.PI / 2);
+
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const colors = new Float32Array(pos.count * 3);
+    const c = new THREE.Color();
+    const nearRoad = new Uint8Array(pos.count);
+
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const z = pos.getZ(i);
+      const h = t.heightAt(x, z);
+      pos.setY(i, h);
+      this.terrainColor(t, x, z, h, c);
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+      nearRoad[i] = t.roadAt(x, z).dist < punchDist ? 1 : 0;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    // Drop every quad fully covered by the ribbon so the two never z-fight.
+    const src = geo.getIndex()!;
+    const kept: number[] = [];
+    for (let i = 0; i < src.count; i += 3) {
+      const a = src.getX(i);
+      const b2 = src.getX(i + 1);
+      const c2 = src.getX(i + 2);
+      if (nearRoad[a] && nearRoad[b2] && nearRoad[c2]) continue;
+      kept.push(a, b2, c2);
+    }
+    geo.setIndex(kept);
+    geo.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
+    return mesh;
+  }
+
+  /** Dense strip following the road spiral, where all the driving happens. */
+  private buildRoadRibbon(
+    t: NonNullable<World['terrain']>,
+    mat: THREE.Material,
+    half: number,
+    q: string,
+  ): THREE.Mesh {
+    const along = q === 'high' ? 900 : q === 'med' ? 620 : 380;
+    const across = q === 'high' ? 40 : q === 'med' ? 28 : 20;
+    const verts = new Float32Array((along + 1) * (across + 1) * 3);
+    const colors = new Float32Array((along + 1) * (across + 1) * 3);
+    // UVs match the bulk mesh's world-space mapping so the shared detail
+    // texture tiles continuously across the seam.
+    const uvs = new Float32Array((along + 1) * (across + 1) * 2);
+    const b = this.world.level.bounds;
+    const span = Math.max(b.maxX - b.minX, b.maxZ - b.minZ);
+    const c = new THREE.Color();
+
+    let uv = 0;
+    let v = 0;
+    for (let i = 0; i <= along; i++) {
+      const tt = i / along;
+      const p = t.roadPoint(tt);
+      const len = Math.hypot(p.x, p.z) || 1;
+      const nx = p.x / len;
+      const nz = p.z / len;
+      for (let j = 0; j <= across; j++) {
+        // Bias samples toward the centreline so the road itself is finest.
+        const u = (j / across) * 2 - 1;
+        const lateral = Math.sign(u) * Math.pow(Math.abs(u), 1.7) * half;
+        const x = p.x + nx * lateral;
+        const z = p.z + nz * lateral;
+        const h = t.heightAt(x, z);
+        verts[v] = x;
+        verts[v + 1] = h + 0.02; // hair above the bulk mesh
+        verts[v + 2] = z;
+        this.terrainColor(t, x, z, h, c);
+        colors[v] = c.r;
+        colors[v + 1] = c.g;
+        colors[v + 2] = c.b;
+        uvs[uv] = x / span + 0.5;
+        uvs[uv + 1] = 0.5 - z / span;
+        uv += 2;
+        v += 3;
+      }
+    }
+
+    const idx: number[] = [];
+    const row = across + 1;
+    for (let i = 0; i < along; i++) {
+      for (let j = 0; j < across; j++) {
+        const a = i * row + j;
+        idx.push(a, a + row, a + 1, a + 1, a + row, a + row + 1);
+      }
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
+    return mesh;
+  }
+
   private buildGround(): void {
+    // Terrain levels supply their own ground.
+    if (this.world.terrain) return;
     const ext = this.world.level.exterior;
     // Grass/dirt, not the shop's concrete — reusing the concrete set out here
     // made the whole yard read as wet asphalt. Big enough that its edge always
@@ -195,6 +381,21 @@ export class GameView {
           mat = M.painted(s.color, 0.45);
           bevel = 0.05;
           break;
+        case 'cabin':
+          mat = M.wood(s.color);
+          bevel = 0.05;
+          break;
+        case 'cabinRoof':
+          mat = paint({ color: s.color, roughness: 0.85, metalness: 0.1, surface: 'panel', repeat: [3, 1] });
+          bevel = 0.04;
+          break;
+        case 'rock':
+          mat = paint({ color: s.color, roughness: 0.98, metalness: 0.0, flatShading: true });
+          bevel = 0.3;
+          break;
+        case 'guardrail':
+          mat = M.steel(s.color, 0.5);
+          break;
         default:
           mat = M.painted(s.color);
       }
@@ -237,6 +438,8 @@ export class GameView {
    */
   private buildShell(): void {
     const lvl = this.world.level;
+    // Only interiors get a roof; outdoor missions are open to the sky.
+    if (!lvl.garageDoor) return;
     const b = lvl.bounds;
     const wallTop = 6;
     const eaves = 6.45;
@@ -337,14 +540,17 @@ export class GameView {
     }
 
     // rolled-up door bundle under the lintel
-    const door = new THREE.Mesh(roundedBox(10, 0.8, 0.6, 0.12), paint({ color: 0xb8453c, metalness: 0.4, roughness: 0.5, surface: 'panel', repeat: [8, 1] }));
-    door.position.set(lvl.garageDoor.center.x, 4.35, lvl.garageDoor.center.z - 0.15);
-    door.castShadow = true;
-    this.add(door);
-    for (const sx of [-1, 1]) {
-      const rail = new THREE.Mesh(box(0.14, 4.6, 0.14), M.darkSteel());
-      rail.position.set(lvl.garageDoor.center.x + sx * 5.1, 2.3, lvl.garageDoor.center.z - 0.15);
-      this.add(rail);
+    const gd = lvl.garageDoor;
+    if (gd) {
+      const door = new THREE.Mesh(roundedBox(10, 0.8, 0.6, 0.12), paint({ color: 0xb8453c, metalness: 0.4, roughness: 0.5, surface: 'panel', repeat: [8, 1] }));
+      door.position.set(gd.center.x, 4.35, gd.center.z - 0.15);
+      door.castShadow = true;
+      this.add(door);
+      for (const sx of [-1, 1]) {
+        const rail = new THREE.Mesh(box(0.14, 4.6, 0.14), M.darkSteel());
+        rail.position.set(gd.center.x + sx * 5.1, 2.3, gd.center.z - 0.15);
+        this.add(rail);
+      }
     }
   }
 
@@ -375,16 +581,18 @@ export class GameView {
     if (q !== 'low') this.add(lightShaft(0.9, 4.2, 6.0, 0xfff0d2, 0.055)).position.set(0, 3.0, -6);
 
     // Daylight spilling in through the open roll-up door.
-    const doorZ = this.world.level.garageDoor.center.z;
+    const gd = this.world.level.garageDoor;
+    if (!gd) return;
     const doorLight = new THREE.SpotLight(0xdcecff, 48, 30, Math.PI / 3.4, 0.7, 1.3);
-    doorLight.position.set(0, 4.0, doorZ + 3);
-    doorLight.target.position.set(0, 0, doorZ - 12);
+    doorLight.position.set(0, 4.0, gd.center.z + 3);
+    doorLight.target.position.set(0, 0, gd.center.z - 12);
     this.add(doorLight);
     this.add(doorLight.target);
   }
 
   private buildGate(): void {
     const g = this.world.level.gate;
+    if (!g) return;
     const tex = stripeTexture();
     tex.repeat.set(3, 1);
     const mat = new THREE.MeshStandardMaterial({
@@ -412,6 +620,7 @@ export class GameView {
   }
 
   private buildLaneDeco(): void {
+    if (!this.world.level.gate) return;
     const tex = chevronTexture();
     for (let i = 0; i < 5; i++) {
       const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.45, depthWrite: false });
@@ -425,39 +634,12 @@ export class GameView {
   // --- items ----------------------------------------------------------------
 
   private makeItemMesh(kind: ItemKind, variantId?: string): THREE.Object3D {
-    if (kind === 'wrench') {
-      const g = new THREE.Group();
-      const steel = chrome(0xc8d0dc);
-      g.add(new THREE.Mesh(roundedBox(0.075, 0.46, 0.05, 0.02), steel));
-      const head = new THREE.Mesh(roundedBox(0.2, 0.15, 0.055, 0.025), steel);
-      head.position.y = 0.27;
-      const jaw = new THREE.Mesh(box(0.075, 0.09, 0.07), steel);
-      jaw.position.set(0.055, 0.33, 0);
-      const tail = new THREE.Mesh(roundedBox(0.15, 0.12, 0.05, 0.02), steel);
-      tail.position.y = -0.26;
-      tail.rotation.z = 0.5;
-      const grip = new THREE.Mesh(roundedBox(0.08, 0.2, 0.055, 0.025), M.rubber(0xd14b3a));
-      g.add(head, jaw, tail, grip);
-      g.traverse((o) => o instanceof THREE.Mesh && (o.castShadow = true));
-      return g;
-    }
-    if (kind === 'flashlight') {
-      const g = new THREE.Group();
-      const body = M.painted(0xffcf3f, 0.42);
-      g.add(new THREE.Mesh(cyl(0.06, 0.068, 0.3, 14), body));
-      const head = new THREE.Mesh(cyl(0.1, 0.07, 0.11, 14), M.darkSteel());
-      head.position.y = 0.19;
-      const lens = new THREE.Mesh(circle(0.088, 14), M.glow(0xfff1c0, 2.2));
-      lens.rotation.x = -Math.PI / 2;
-      lens.position.y = 0.246;
-      const knurl = new THREE.Mesh(cyl(0.062, 0.062, 0.07, 14), M.rubber(0x2a2f38));
-      knurl.position.y = -0.05;
-      g.add(head, lens, knurl);
-      g.traverse((o) => o instanceof THREE.Mesh && (o.castShadow = true));
-      return g;
-    }
+    const tool = makeTool(kind);
+    if (tool) return tool;
     // A part on the floor should look like the part it is, not a generic box.
-    const variant = (variantId ? variantById(variantId) : undefined) ?? defaultVariant(kind as PartKind);
+    const variant =
+      (variantId ? variantById(variantId) : undefined) ?? defaultVariant(kind as PartKind);
+    if (!variant) return new THREE.Group();
     const g = new THREE.Group();
     const part = makePart(kind as PartKind, variant, this.world.vehicle.bodyColor);
     // Headlight beams belong to the car, not to a pickup lying on the floor.
@@ -499,7 +681,7 @@ export class GameView {
   }
 
   private buildCheckpoints(): void {
-    for (const cp of this.world.level.checkpoints) {
+    for (const cp of this.world.level.checkpoints ?? []) {
       const ring = new THREE.Mesh(
         torus(CHECKPOINT_RADIUS * 0.7, 0.16, 10, 30),
         new THREE.MeshStandardMaterial({ color: 0x38e0c8, emissive: 0x0f4b44, emissiveIntensity: 0.8, roughness: 0.35, metalness: 0.4 }),
@@ -519,13 +701,49 @@ export class GameView {
   }
 
   private buildClockIn(): void {
-    const p = this.world.level.clockInPos;
+    const st = this.world.level.stations.find((s) => s.kind === 'clockOut');
+    if (!st) return;
     this.clockScreen = new THREE.Mesh(
       plane(1.35, 0.95),
       new THREE.MeshStandardMaterial({ color: 0x0a141f, emissive: 0x113322, emissiveIntensity: 0.5, roughness: 0.3 }),
     );
-    this.clockScreen.position.set(p.x, 1.5, p.z + 0.44);
+    this.clockScreen.position.set(st.pos.x, 1.5, st.pos.z + 0.44);
     this.add(this.clockScreen);
+  }
+
+  /** The extraction volume: a beacon you can see from up the mountain. */
+  private buildExfil(): void {
+    const x = this.world.level.exfil;
+    if (!x) return;
+    const g = new THREE.Group();
+    const pad = new THREE.Mesh(
+      circle(x.radius, 40),
+      paint({ color: 0x38e0c8, emissive: 0x0f5a50, emissiveIntensity: 0.7, transparent: true, opacity: 0.3 }),
+    );
+    pad.rotation.x = -Math.PI / 2;
+    pad.position.y = 0.05;
+    g.add(pad);
+    const ring = new THREE.Mesh(torus(x.radius, 0.22, 8, 44), M.glow(0x38e0c8, 1.6));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.1;
+    g.add(ring);
+    // a shaft of light so it reads from the summit
+    const beam = lightShaft(3.0, x.radius * 0.7, 46, 0x6ff0dc, 0.05);
+    beam.position.y = 23;
+    beam.name = 'beam';
+    g.add(beam);
+    g.position.set(x.pos.x, x.pos.y, x.pos.z);
+    this.exfilMesh = g;
+    this.add(g);
+  }
+
+  private buildWolves(): void {
+    for (const w of this.world.wolves) {
+      const o = makeWolfMesh();
+      o.position.set(w.pos.x, w.pos.y, w.pos.z);
+      this.add(o);
+      this.wolfMeshes.set(w.id, o);
+    }
   }
 
   // --- props ----------------------------------------------------------------
@@ -649,6 +867,27 @@ export class GameView {
           if (wing) wing.rotation.z = Math.sin(t * 9 + a.phase) * 0.5;
           break;
         }
+        case 'campfire': {
+          const flame = a.o.getObjectByName('flame');
+          if (flame) {
+            flame.rotation.y += dt * 1.7;
+            for (let i = 0; i < 3; i++) {
+              const lick = flame.getObjectByName('lick' + i);
+              if (!lick) continue;
+              const f = 1 + Math.sin(t * (7 + i * 2.5) + a.phase + i) * 0.22;
+              lick.scale.set(1 / f, f, 1 / f);
+            }
+          }
+          const light = a.o.getObjectByName('fireLight') as THREE.PointLight | undefined;
+          if (light) light.intensity = 12 + Math.sin(t * 9 + a.phase) * 3 + Math.sin(t * 23) * 1.5;
+          if (Math.random() < dt * 14) {
+            this.particles.emit(
+              { x: (d.x as number) + (Math.random() - 0.5) * 0.3, y: (d.y as number) + 0.9, z: (d.z as number) + (Math.random() - 0.5) * 0.3 },
+              { count: 1, speed: 0.5, spread: 0.25, up: 1.4, gravity: -1.2, size: 8, ttl: 1.1, color: [1.0, 0.6, 0.22] },
+            );
+          }
+          break;
+        }
         case 'weldBot': {
           d.t = (d.t as number) - dt;
           if ((d.t as number) <= 0) {
@@ -719,9 +958,11 @@ export class GameView {
     this.particles.update(dt, { x: 0, y: 3.4, z: -4, r: 18 });
 
     // gate slides up as it opens
-    const target = w.gateOpen ? 1 : 0;
-    this.gateAnim += (target - this.gateAnim) * Math.min(1, 0.08);
-    this.gateMesh.position.y = w.level.gate.center.y + this.gateAnim * 4.2;
+    if (this.gateMesh && w.level.gate) {
+      const target = w.gateOpen ? 1 : 0;
+      this.gateAnim += (target - this.gateAnim) * Math.min(1, 0.08);
+      this.gateMesh.position.y = w.level.gate.center.y + this.gateAnim * 4.2;
+    }
 
     // items: hide when picked, idle bob so they read as pickups
     for (const it of w.items) {
@@ -735,6 +976,7 @@ export class GameView {
     }
 
     this.syncVehicle(alpha, dt, driving, speed);
+    this.syncWolves(dt);
     this.syncStateFx();
     this.post.positionSun(this.camera, this.sky.sunDir);
     this.post.setSpeedFx(driving ? speed / 22 : speed / 26);
@@ -808,9 +1050,62 @@ export class GameView {
     void speed;
   }
 
+  /** Wolf pose: gait, head tracking, and a crouch on the attack telegraph. */
+  private syncWolves(dt: number): void {
+    if (!this.wolfMeshes.size) return;
+    for (const w of this.world.wolves) {
+      const o = this.wolfMeshes.get(w.id);
+      if (!o) continue;
+      if (w.state === 'dead') {
+        // flop over and stay there
+        o.rotation.z += (Math.PI / 2 - o.rotation.z) * Math.min(1, dt * 6);
+        o.position.y += (this.world.groundHeight(o.position.x, o.position.z) + 0.25 - o.position.y) * Math.min(1, dt * 6);
+        continue;
+      }
+      o.position.set(w.pos.x, w.pos.y, w.pos.z);
+      o.rotation.y = w.yaw;
+
+      const body = o.getObjectByName('body');
+      const moving = w.state === 'stalk' || w.state === 'lunge' || w.state === 'flee';
+      const rate = w.state === 'lunge' ? 22 : w.state === 'stalk' ? 11 : 6;
+      this.clock; // gait phase rides the shared clock
+      const ph = this.clock * rate + w.id;
+      const legs = o.getObjectByName('legs');
+      if (legs) {
+        legs.children.forEach((leg, i) => {
+          const swing = moving ? Math.sin(ph + (i % 2 ? Math.PI : 0) + (i < 2 ? 0 : 0.6)) * 0.55 : 0;
+          leg.rotation.x = swing;
+        });
+      }
+      if (body) {
+        // Telegraph reads as a low, coiled crouch — the player's cue to react.
+        const crouch = w.state === 'telegraph' ? 0.16 : 0;
+        body.position.y = -crouch + (moving ? Math.abs(Math.sin(ph)) * 0.03 : 0);
+        body.rotation.x = w.state === 'telegraph' ? -0.14 : w.state === 'lunge' ? 0.18 : 0;
+      }
+      const tail = o.getObjectByName('tail');
+      if (tail) tail.rotation.z = Math.sin(this.clock * 3 + w.id) * 0.25;
+      const head = o.getObjectByName('head');
+      if (head) head.rotation.x = w.state === 'telegraph' ? -0.2 : Math.sin(this.clock * 1.5 + w.id) * 0.06;
+    }
+  }
+
   private syncStateFx(): void {
     const w = this.world;
     const t = performance.now() * 0.004;
+    if (this.exfilMesh) {
+      // The pad is always visible so you can see where the job ends; the
+      // skybeam only fires once the mission is actually finishable.
+      const ready = w.objectives.readyToFinish();
+      const beam = this.exfilMesh.getObjectByName('beam');
+      if (beam) beam.visible = ready;
+      this.exfilMesh.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          const m = o.material as THREE.MeshStandardMaterial;
+          if (m.emissive) m.emissiveIntensity = ready ? 1.4 + 0.4 * Math.sin(t * 1.6) : 0.35;
+        }
+      });
+    }
     this.checkpointMeshes.forEach((ring, i) => {
       const mat = ring.material as THREE.MeshStandardMaterial;
       ring.rotation.y += 0.01;
@@ -830,8 +1125,9 @@ export class GameView {
       }
     });
 
+    if (!this.clockScreen) return;
     const screenMat = this.clockScreen.material as THREE.MeshStandardMaterial;
-    if (w.objectives.readyToClockOut()) {
+    if (w.objectives.readyToFinish()) {
       screenMat.emissive.setHex(0x1f9d57);
       screenMat.emissiveIntensity = 0.7 + 0.3 * Math.sin(t);
     } else {
@@ -844,13 +1140,13 @@ export class GameView {
     const rebuild = s.video.postfx !== this.settings.video.postfx || s.video.quality !== this.settings.video.quality;
     this.settings = s;
     this.baseFov = s.video.fov;
-    this.renderer.toneMappingExposure = s.video.brightness;
     this.renderer.shadowMap.enabled = s.video.shadows;
     if (rebuild) {
       this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
       this.post = new Post(this.renderer, this.scene, this.camera, s.video.quality, s.video.postfx, this.sky.sun);
       this.post.setSize(innerWidth, innerHeight);
     }
+    this.post.setExposure(s.video.brightness);
   }
 
   pulse(fov: number, shake: number): void {
@@ -879,6 +1175,19 @@ export class GameView {
   /** Dust puff at the player's feet (footsteps, landings). */
   footFx(strength = 1): void {
     const p = this.world.player.pos;
-    this.particles.dust({ x: p.x, y: 0.06, z: p.z }, strength);
+    this.particles.dust({ x: p.x, y: p.y + 0.06, z: p.z }, strength);
+  }
+  /** Vehicle slammed something. */
+  impactFx(pos: Vec3, severity: number): void {
+    this.particles.impact({ x: pos.x, y: pos.y, z: pos.z }, Math.min(1.5, severity * 4));
+    this.pulse(-3, Math.min(0.55, 0.2 + severity * 2));
+  }
+  /** A wolf went down. */
+  wolfDownFx(pos: Vec3): void {
+    this.particles.dust({ x: pos.x, y: pos.y + 0.2, z: pos.z }, 1.2);
+  }
+  /** Player swung a weapon. */
+  swingFx(): void {
+    this.vm.bump();
   }
 }

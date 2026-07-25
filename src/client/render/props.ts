@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { Prop, PropKind } from '../../content/levels/garage';
 import { M, chrome, glass, paint } from './materials';
-import { box, capsule, circle, cone, cyl, lathe, plane, roundedBox, sphere, torus, tyre } from './geo';
+import { box, capsule, circle, cone, cyl, extrude, lathe, plane, roundedBox, shell, sphere, torus, tyre } from './geo';
 import { posterTexture } from './textures';
 
 // Every world prop, rebuilt on the shared geometry/material kit. Props are pure
@@ -735,12 +735,244 @@ function fenceSection(): THREE.Group {
   return g;
 }
 
+// --- mountain kit -----------------------------------------------------------
+
+/** Conifer: a tapered stack of drooping skirts, not a cone. */
+function pine(): THREE.Group {
+  const g = new THREE.Group();
+  const r = rng(53);
+  const needles = paint({ color: 0x2c5b34, roughness: 1, flatShading: true });
+  const dark = paint({ color: 0x24492b, roughness: 1, flatShading: true });
+  g.add(at(mesh(cyl(0.11, 0.22, 2.2, 6), paint({ color: 0x4c3626, roughness: 0.95 })), 0, 1.1, 0));
+  const tiers = 5;
+  for (let i = 0; i < tiers; i++) {
+    const u = i / tiers;
+    const rad = 1.5 * (1 - u * 0.72);
+    const h = 1.5 - u * 0.5;
+    const c = mesh(cone(rad, h, 7), i % 2 ? needles : dark);
+    c.rotation.y = r() * Math.PI;
+    g.add(at(c, (r() - 0.5) * 0.14, 1.5 + i * 1.02, (r() - 0.5) * 0.14));
+  }
+  return g;
+}
+
+function boulder(): THREE.Mesh {
+  // A low-poly sphere with jittered vertices reads as rock far better than a box.
+  const geo = sphere(0.9, 7, 5).clone();
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const r = rng(29);
+  for (let i = 0; i < pos.count; i++) {
+    const k = 0.72 + r() * 0.5;
+    pos.setXYZ(i, pos.getX(i) * k * 1.15, pos.getY(i) * k * 0.78, pos.getZ(i) * k);
+  }
+  geo.computeVertexNormals();
+  const m = mesh(geo, paint({ color: 0x6f6b62, roughness: 0.96, flatShading: true }));
+  m.position.y = 0.42;
+  return m;
+}
+
+function rockSpire(): THREE.Group {
+  const g = new THREE.Group();
+  const r = rng(71);
+  const rock = paint({ color: 0x6a655c, roughness: 0.96, flatShading: true });
+  for (let i = 0; i < 3; i++) {
+    const h = 4 + r() * 5;
+    const c = mesh(cone(1.1 + r() * 0.7, h, 5), rock);
+    c.rotation.set((r() - 0.5) * 0.2, r() * Math.PI, (r() - 0.5) * 0.2);
+    g.add(at(c, (r() - 0.5) * 2.4, h / 2 - 0.4, (r() - 0.5) * 2.4));
+  }
+  return g;
+}
+
+function guardrail(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(at(mesh(roundedBox(0.14, 0.9, 0.14, 0.02), M.darkSteel(0x4a4f58)), 0, 0.45, 0));
+  const beam = mesh(roundedBox(3.1, 0.28, 0.08, 0.03), M.steel(0xa8b0bd, 0.5));
+  g.add(at(beam, 0, 0.78, 0.08));
+  // reflector
+  g.add(at(mesh(box(0.1, 0.1, 0.02), M.glow(0xff5d3a, 1.4)), 0, 0.78, 0.13));
+  return g;
+}
+
+function campfire(): THREE.Group {
+  const g = new THREE.Group();
+  const r = rng(17);
+  const stoneMat = paint({ color: 0x6f6b62, roughness: 0.95, flatShading: true });
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2;
+    const s = mesh(sphere(0.2 + r() * 0.1, 5, 4), stoneMat);
+    s.scale.y = 0.7;
+    g.add(at(s, Math.cos(a) * 0.85, 0.1, Math.sin(a) * 0.85));
+  }
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    const log = mesh(cyl(0.07, 0.09, 1.1, 6), paint({ color: 0x3a2a1c, roughness: 0.95 }));
+    log.rotation.set(1.1, a, 0);
+    g.add(at(log, Math.cos(a) * 0.2, 0.32, Math.sin(a) * 0.2));
+  }
+  const flame = new THREE.Group();
+  flame.name = 'flame';
+  for (let i = 0; i < 3; i++) {
+    const f = mesh(cone(0.26 - i * 0.06, 0.7 + i * 0.25, 6), M.glow(i === 0 ? 0xffb020 : 0xff7a1a, 3.4), false);
+    f.name = 'lick' + i;
+    flame.add(at(f, 0, 0.5 + i * 0.16, 0));
+  }
+  g.add(flame);
+  const light = new THREE.PointLight(0xff9a3c, 14, 12, 2);
+  light.name = 'fireLight';
+  g.add(at(light, 0, 0.9, 0));
+  return g;
+}
+
+function signpost(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(at(mesh(cyl(0.07, 0.08, 2.4, 6), paint({ color: 0x4c3626, roughness: 0.95 })), 0, 1.2, 0));
+  for (let i = 0; i < 2; i++) {
+    const board = mesh(roundedBox(1.5, 0.3, 0.06, 0.02), M.wood(0xb59060));
+    board.rotation.y = i * 0.5 - 0.25;
+    g.add(at(board, 0.5, 2.0 - i * 0.42, 0));
+  }
+  return g;
+}
+
+/**
+ * Everything that turns the cabin's collision boxes into a building: a pitched
+ * roof over the flat slab, a door, lit windows, and deck clutter.
+ */
+function cabinDeco(): THREE.Group {
+  const g = new THREE.Group();
+
+  // Pitched roof over the flat roof slab (top at y ≈ 3.15). Each panel spans
+  // ridge → eave exactly once; making them double length splayed them open.
+  const roofMat = paint({ color: 0x54402c, roughness: 0.9, metalness: 0.05 });
+  const halfW = 3.3;
+  const rise = 1.35;
+  const pitch = Math.atan2(rise, halfW);
+  const slope = Math.hypot(halfW, rise);
+  const eaveY = 3.25;
+  for (const sx of [-1, 1]) {
+    const panel = mesh(box(slope, 0.16, 5.5), roofMat);
+    panel.rotation.z = -sx * pitch;
+    g.add(at(panel, (sx * halfW) / 2, eaveY + rise / 2, -0.6));
+  }
+  g.add(at(mesh(roundedBox(0.34, 0.2, 5.7, 0.07), M.darkSteel(0x3a2c1e)), 0, eaveY + rise + 0.06, -0.6));
+  // gable ends: a flat triangle closing each end of the roof
+  const gableShape: [number, number][] = [
+    [-halfW, 0],
+    [halfW, 0],
+    [0, rise],
+  ];
+  for (const sz of [-1, 1]) {
+    const gable = mesh(extrude('cabinGable', gableShape, 0.14, 0), roofMat);
+    g.add(at(gable, 0, eaveY + rise / 2, -0.6 + sz * 2.72));
+  }
+  // chimney
+  g.add(at(mesh(roundedBox(0.5, 1.5, 0.5, 0.05), paint({ color: 0x5d5750, roughness: 0.95 })), 1.7, 4.2, -1.8));
+
+  // door + lit windows on the face that looks at the road
+  g.add(at(mesh(roundedBox(0.9, 1.9, 0.08, 0.03), M.wood(0x6a4a2c)), 0, 1.25, 1.46));
+  g.add(at(mesh(cyl(0.05, 0.05, 0.1, 8), chrome(0xc9a24a)), 0.32, 1.2, 1.53));
+  for (const sx of [-1.7, 1.7]) {
+    g.add(at(mesh(roundedBox(0.9, 0.8, 0.1, 0.03), M.wood(0x4e3722)), sx, 1.7, 1.46));
+    g.add(at(mesh(box(0.72, 0.62, 0.04), M.glow(0xffd08a, 1.5)), sx, 1.7, 1.52));
+    g.add(at(mesh(box(0.06, 0.62, 0.06), M.wood(0x4e3722)), sx, 1.7, 1.55));
+  }
+
+  g.add(at(mesh(roundedBox(0.7, 0.7, 0.7, 0.05), M.cardboard(0x9c6a34)), -2.2, 0.5, 2.0));
+  g.add(at(mesh(roundedBox(1.4, 0.1, 0.5, 0.02), M.wood(0xa8834f)), 1.8, 0.62, 1.9));
+  for (const sx of [-1, 1]) g.add(at(mesh(roundedBox(0.09, 0.5, 0.09, 0.02), M.wood(0x7d5836)), 1.8 + sx * 0.55, 0.32, 1.9));
+  // stacked firewood
+  for (let i = 0; i < 6; i++) {
+    const log = mesh(cyl(0.09, 0.09, 1.1, 6), paint({ color: 0x59422c, roughness: 0.95 }));
+    log.rotation.z = Math.PI / 2;
+    g.add(at(log, 2.4, 0.12 + Math.floor(i / 3) * 0.2, -1.4 + (i % 3) * 0.2));
+  }
+  // lantern by the door
+  g.add(at(mesh(roundedBox(0.2, 0.28, 0.2, 0.04), M.glow(0xffce7a, 2.0)), 0, 1.9, 1.6));
+  return g;
+}
+
+function snowPatch(): THREE.Mesh {
+  const geo = circle(1.6, 9).clone();
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const r = rng(41);
+  for (let i = 1; i < pos.count; i++) {
+    const k = 0.6 + r() * 0.7;
+    pos.setXYZ(i, pos.getX(i) * k, pos.getY(i) * k, 0);
+  }
+  geo.computeVertexNormals();
+  const m = mesh(geo, paint({ color: 0xe8eef8, roughness: 0.85 }), false, true);
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = 0.06;
+  (m.material as THREE.Material).polygonOffset = true;
+  (m.material as THREE.Material).polygonOffsetFactor = -2;
+  return m;
+}
+
+function shrub(): THREE.Group {
+  const g = new THREE.Group();
+  const r = rng(83);
+  const m = paint({ color: 0x4a6b34, roughness: 1, flatShading: true });
+  for (let i = 0; i < 3; i++) {
+    const s = mesh(sphere(0.34 + r() * 0.2, 6, 4), m);
+    s.scale.y = 0.7;
+    g.add(at(s, (r() - 0.5) * 0.5, 0.26 + r() * 0.12, (r() - 0.5) * 0.5));
+  }
+  return g;
+}
+
+function caveMouth(): THREE.Group {
+  const g = new THREE.Group();
+  const rock = paint({ color: 0x59544c, roughness: 0.97, flatShading: true });
+  // an arch of jittered blocks around a black opening
+  const r = rng(61);
+  for (let i = 0; i <= 10; i++) {
+    const a = Math.PI * (i / 10);
+    const b = mesh(sphere(0.9 + r() * 0.5, 6, 4), rock);
+    b.scale.set(1, 0.8, 0.9);
+    g.add(at(b, Math.cos(a) * 3.0, Math.sin(a) * 3.2, 4.4));
+  }
+  const dark = mesh(plane(4.6, 3.2), paint({ color: 0x05070a, roughness: 1 }), false, false);
+  g.add(at(dark, 0, 1.6, 4.3));
+  // the door panel you reroute — the mystery symbol glows faintly on it
+  const panel = mesh(roundedBox(0.9, 1.2, 0.14, 0.03), M.darkSteel(0x232a33));
+  g.add(at(panel, 2.6, 1.1, 4.6));
+  g.add(at(mesh(circle(0.26, 16), M.glow(0x5fd9c8, 1.8), false, false), 2.6, 1.25, 4.69));
+  return g;
+}
+
+/** A previous team's 4×4, half over the edge. The first real "we're not first". */
+function wreck(): THREE.Group {
+  const g = new THREE.Group();
+  const rust = paint({ color: 0x6b4a35, roughness: 0.95, metalness: 0.25 });
+  const body = mesh(roundedBox(1.9, 1.0, 4.0, 0.16), rust);
+  g.add(at(body, 0, 0.85, 0));
+  g.add(at(mesh(roundedBox(1.7, 0.7, 1.4, 0.14), rust), 0, 1.5, -0.4));
+  for (const sx of [-1, 1])
+    for (const sz of [-1.3, 1.2]) {
+      if (sx > 0 && sz > 0) continue; // one wheel is long gone
+      const w = mesh(tyre(0.42, 0.3), M.tyre(0x24262b));
+      g.add(at(w, sx * 0.95, 0.42, sz));
+    }
+  g.rotation.set(0.28, 0, 0.42); // sitting nose-down on the slope
+  return g;
+}
+
+function markerFlag(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(at(mesh(cyl(0.035, 0.04, 1.3, 5), M.painted(0xdfe3ea, 0.6)), 0, 0.65, 0));
+  g.add(at(mesh(box(0.05, 0.3, 0.05), M.glow(0xff5d3a, 1.2)), 0, 1.15, 0));
+  return g;
+}
+
 // ---------------------------------------------------------------------------
 
 /** Kinds cheap and numerous enough to be worth instancing (built by view.ts). */
 export const INSTANCED_KINDS = new Set<PropKind>(['grass', 'window']);
 /** Kinds view.ts animates each frame. */
-export const ANIMATED_KINDS = new Set<PropKind>(['fan', 'hangLamp', 'banner', 'bird', 'cloud', 'gauge', 'weldBot']);
+export const ANIMATED_KINDS = new Set<PropKind>([
+  'fan', 'hangLamp', 'banner', 'bird', 'cloud', 'gauge', 'weldBot', 'campfire',
+]);
 
 export function makeProp(p: Prop): THREE.Object3D | null {
   switch (p.kind) {
@@ -824,6 +1056,30 @@ export function makeProp(p: Prop): THREE.Object3D | null {
       return fenceSection();
     case 'ceilingLight':
       return ceilingLight();
+    case 'pine':
+      return pine();
+    case 'boulder':
+      return boulder();
+    case 'rockSpire':
+      return rockSpire();
+    case 'guardrail':
+      return guardrail();
+    case 'campfire':
+      return campfire();
+    case 'signpost':
+      return signpost();
+    case 'cabinDeco':
+      return cabinDeco();
+    case 'snowPatch':
+      return snowPatch();
+    case 'shrub':
+      return shrub();
+    case 'caveMouth':
+      return caveMouth();
+    case 'wreck':
+      return wreck();
+    case 'markerFlag':
+      return markerFlag();
     default:
       return null;
   }

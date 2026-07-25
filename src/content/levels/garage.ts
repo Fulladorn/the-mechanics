@@ -1,116 +1,10 @@
-import type { Vec3 } from '../../shared/math';
-import { box, slab, type Box } from '../../sim/collision';
-import type { PartKind } from '../../sim/vehicle';
+import { box, slab } from '../../sim/collision';
+import type { ItemSpawn, LevelDef, Prop, PropKind, Solid } from './types';
 
-export interface PartSpawn {
-  part: PartKind;
-  variantId: string;
-  pos: Vec3;
-}
-
-// Tags let the renderer pick materials/procedural textures per structure.
-export type SolidTag =
-  | 'floor'
-  | 'wall'
-  | 'divider'
-  | 'crate'
-  | 'cabinet'
-  | 'pallet'
-  | 'terminal'
-  | 'door'
-  | 'invisible';
-
-export interface Solid {
-  box: Box;
-  color: number;
-  tag: SolidTag;
-  hidden?: boolean; // collision-only (not rendered) — used for the open doorway
-}
-
-// Render-only decoration. Never enters collision, so the sim/tests are untouched.
-export type PropKind =
-  | 'tire'
-  | 'barrel'
-  | 'toolbox'
-  | 'jackstand'
-  | 'hoist'
-  | 'shelf'
-  | 'toolwall'
-  | 'poster'
-  | 'posterSymbol'
-  | 'pipe'
-  | 'ceilingLight'
-  | 'parkingLine'
-  | 'cone'
-  | 'window'
-  | 'fan'
-  | 'hangLamp'
-  | 'weldBot'
-  | 'toolchest'
-  | 'lockers'
-  | 'compressor'
-  | 'workbench'
-  | 'cables'
-  | 'sign'
-  | 'banner'
-  | 'gauge'
-  | 'fireext'
-  | 'jerrycan'
-  | 'crateStack'
-  | 'oilStain'
-  | 'tireMark'
-  | 'van'
-  | 'fence'
-  | 'yardLight'
-  | 'silhouette'
-  | 'tree'
-  | 'powerpole'
-  | 'cloud'
-  | 'bird'
-  | 'grass'
-  | 'roadline'
-  | 'lift'
-  | 'paintStation';
-
-export interface Prop {
-  kind: PropKind;
-  pos: Vec3;
-  rot?: number;
-  scale?: number;
-  color?: number;
-}
-
-export interface Exterior {
-  skyTop: string;
-  skyHorizon: string;
-  ground: number;
-  fogColor: number;
-  fogNear: number;
-  fogFar: number;
-}
-
-export interface GarageLevel {
-  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
-  /** Key into SKY_PRESETS — drives sun angle, colour, fog and the IBL probe. */
-  skyPreset?: string;
-  solids: Solid[];
-  props: Prop[];
-  gate: Box;
-  garageDoor: { center: Vec3; width: number; height: number };
-  exterior: Exterior;
-  spawn: Vec3;
-  spawnYaw: number;
-  wrenchPos: Vec3;
-  flashlightPos: Vec3;
-  partSpawns: PartSpawn[];
-  paintPos: Vec3;
-  lorePos: Vec3;
-  kartStart: Vec3;
-  kartYaw: number;
-  checkpoints: Vec3[];
-  clockInPos: Vec3;
-  puzzleSeed: number;
-}
+// Re-exported so existing render code can keep importing prop/solid types from
+// the level it renders.
+export type { Exterior, Prop, PropKind, Solid, SolidTag } from './types';
+export type GarageLevel = LevelDef;
 
 // The training bay: a big shed split by a divider wall. The only way north
 // (into the workshop) is the speed gate — which opens once you bunny-hop fast
@@ -278,32 +172,38 @@ export function makeGarage(): GarageLevel {
   P('lift', 0, 0, -6);
   P('paintStation', 3.4, 0, -9);
 
-  // parts to scavenge & bolt on (duplicate kinds w/ different variants = choices)
-  const partSpawns: PartSpawn[] = [
-    { part: 'wheel', variantId: 'wheel.street', pos: { x: -9, y: 0.4, z: -3 } },
-    { part: 'wheel', variantId: 'wheel.street', pos: { x: -10.2, y: 0.4, z: -3.5 } },
-    { part: 'wheel', variantId: 'wheel.offroad', pos: { x: 9.4, y: 0.4, z: -3 } },
-    { part: 'wheel', variantId: 'wheel.offroad', pos: { x: 10.6, y: 0.4, z: -3.5 } },
-    { part: 'wheel', variantId: 'wheel.slick', pos: { x: -18, y: 0.4, z: -19.5 } },
-    { part: 'wheel', variantId: 'wheel.slick', pos: { x: 18, y: 0.4, z: -19.5 } },
-    { part: 'engine', variantId: 'engine.v4', pos: { x: 12, y: 0.7, z: -3 } },
-    { part: 'engine', variantId: 'engine.v6', pos: { x: -12, y: 1.35, z: -3 } },
-    { part: 'engine', variantId: 'engine.v8', pos: { x: -12, y: 1.25, z: -6 } },
-    { part: 'seat', variantId: 'seat.std', pos: { x: -24.5, y: 1.0, z: -18 } },
-    { part: 'seat', variantId: 'seat.racing', pos: { x: 24.5, y: 1.0, z: -4 } },
-    { part: 'body', variantId: 'body.std', pos: { x: 6, y: 0.5, z: -12 } },
-    { part: 'body', variantId: 'body.light', pos: { x: -6, y: 0.5, z: -12 } },
-    { part: 'body', variantId: 'body.armor', pos: { x: 0, y: 0.5, z: -19 } },
-    { part: 'battery', variantId: 'battery.std', pos: { x: -20, y: 0.45, z: -12 } },
-    { part: 'battery', variantId: 'battery.hd', pos: { x: 13.5, y: 0.45, z: -16 } },
-    { part: 'bumper', variantId: 'bumper.std', pos: { x: 14, y: 0.45, z: -12 } },
-    { part: 'bumper', variantId: 'bumper.bull', pos: { x: -14, y: 0.45, z: -12 } },
-    { part: 'headlights', variantId: 'headlights.std', pos: { x: 5, y: 0.95, z: 12 } },
-    { part: 'spoiler', variantId: 'spoiler.gt', pos: { x: 24, y: 1.0, z: 16 } },
-    { part: 'exhaust', variantId: 'exhaust.sport', pos: { x: -24, y: 1.0, z: 17 } },
+  // Tools + parts to scavenge and bolt on. Duplicate kinds with different
+  // variants are the point: your build is a set of choices.
+  const items: ItemSpawn[] = [
+    { kind: 'wrench', pos: { x: 7, y: 1.05, z: 12 } },
+    { kind: 'flashlight', pos: { x: -7, y: 1.05, z: 12 } },
+    { kind: 'wheel', variantId: 'wheel.street', pos: { x: -9, y: 0.4, z: -3 } },
+    { kind: 'wheel', variantId: 'wheel.street', pos: { x: -10.2, y: 0.4, z: -3.5 } },
+    { kind: 'wheel', variantId: 'wheel.offroad', pos: { x: 9.4, y: 0.4, z: -3 } },
+    { kind: 'wheel', variantId: 'wheel.offroad', pos: { x: 10.6, y: 0.4, z: -3.5 } },
+    { kind: 'wheel', variantId: 'wheel.slick', pos: { x: -18, y: 0.4, z: -19.5 } },
+    { kind: 'wheel', variantId: 'wheel.slick', pos: { x: 18, y: 0.4, z: -19.5 } },
+    { kind: 'engine', variantId: 'engine.v4', pos: { x: 12, y: 0.7, z: -3 } },
+    { kind: 'engine', variantId: 'engine.v6', pos: { x: -12, y: 1.35, z: -3 } },
+    { kind: 'engine', variantId: 'engine.v8', pos: { x: -12, y: 1.25, z: -6 } },
+    { kind: 'seat', variantId: 'seat.std', pos: { x: -24.5, y: 1.0, z: -18 } },
+    { kind: 'seat', variantId: 'seat.racing', pos: { x: 24.5, y: 1.0, z: -4 } },
+    { kind: 'body', variantId: 'body.std', pos: { x: 6, y: 0.5, z: -12 } },
+    { kind: 'body', variantId: 'body.light', pos: { x: -6, y: 0.5, z: -12 } },
+    { kind: 'body', variantId: 'body.armor', pos: { x: 0, y: 0.5, z: -19 } },
+    { kind: 'battery', variantId: 'battery.std', pos: { x: -20, y: 0.45, z: -12 } },
+    { kind: 'battery', variantId: 'battery.hd', pos: { x: 13.5, y: 0.45, z: -16 } },
+    { kind: 'bumper', variantId: 'bumper.std', pos: { x: 14, y: 0.45, z: -12 } },
+    { kind: 'bumper', variantId: 'bumper.bull', pos: { x: -14, y: 0.45, z: -12 } },
+    { kind: 'headlights', variantId: 'headlights.std', pos: { x: 5, y: 0.95, z: 12 } },
+    { kind: 'spoiler', variantId: 'spoiler.gt', pos: { x: 24, y: 1.0, z: 16 } },
+    { kind: 'exhaust', variantId: 'exhaust.sport', pos: { x: -24, y: 1.0, z: 17 } },
   ];
 
   return {
+    id: 'garage',
+    title: 'TRAINING BAY',
+    subtitle: 'Company Contract · Orientation',
     bounds: { minX: -28, maxX: 28, minZ: -24, maxZ: 20 },
     skyPreset: 'summerDay',
     solids,
@@ -320,20 +220,41 @@ export function makeGarage(): GarageLevel {
     },
     spawn: { x: 0, y: 0, z: 15 },
     spawnYaw: 0,
-    wrenchPos: { x: 7, y: 1.05, z: 12 },
-    flashlightPos: { x: -7, y: 1.05, z: 12 },
-    partSpawns,
-    paintPos: { x: 3.4, y: 1.0, z: -9 },
-    lorePos: { x: -25.5, y: 1.0, z: -20 },
-    kartStart: { x: 0, y: 0, z: -6 },
-    kartYaw: 0,
+    items,
+    stations: [
+      { id: 'paint', kind: 'paint', pos: { x: 3.4, y: 1.0, z: -9 }, label: 'Repaint the body' },
+      { id: 'crate', kind: 'lore', pos: { x: -25.5, y: 1.0, z: -20 }, label: 'Inspect the sealed crate' },
+      { id: 'clockout', kind: 'clockOut', pos: { x: 0, y: 1.2, z: -22.2 }, label: 'Clock out — finish', completes: 'clockin' },
+    ],
+    vehicleStart: { x: 0, y: 0, z: -6 },
+    vehicleYaw: 0,
     checkpoints: [
       { x: 16, y: 0, z: -9 },
       { x: 16, y: 0, z: -20 },
       { x: -16, y: 0, z: -20 },
       { x: -16, y: 0, z: -9 },
     ],
-    clockInPos: { x: 0, y: 1.2, z: -22.2 },
+    objectives: [
+      { id: 'move', text: 'Move (WASD) and look (mouse)' },
+      { id: 'bhop', text: 'Hold Space + strafe to bunny-hop through the speed gate (10 m/s)', marker: { x: 0, y: 1.6, z: 0 } },
+      { id: 'pickup', text: 'Pick up the Wrench (E)', marker: { x: 7, y: 1.05, z: 12 } },
+      { id: 'assemble', text: 'Build the car — bolt on every required part', marker: { x: 0, y: 1, z: -6 } },
+      { id: 'drive', text: 'Drive your build through every checkpoint', marker: { x: 16, y: 1, z: -9 } },
+      { id: 'clockin', text: 'Clock out at the exit terminal (E)', marker: { x: 0, y: 1.2, z: -22.2 } },
+    ],
     puzzleSeed: 1337,
+    narrative: {
+      intro: "Welcome to the training bay, rookie. Let's see if you've got the hands for this job.",
+      outro: "Clean work. You'll do. Pack up — real jobs start soon, and they're not all this friendly.",
+      lore: 'Huh. That symbol on the crate… ignore it. Above your pay grade.',
+      objectives: {
+        move: 'Good. Get a feel for those legs.',
+        bhop: 'Nice hops. Speed keeps you alive out in the field.',
+        pickup: 'Grab that wrench. Never show up to a job empty-handed.',
+        assemble: 'Scrounge the parts and bolt her together. Your build, your call.',
+        drive: 'Take her around the cones. Mind the paint job.',
+        clockin: '',
+      },
+    },
   };
 }

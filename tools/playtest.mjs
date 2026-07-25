@@ -81,14 +81,15 @@ try {
   const mech = (fn, arg) => page.evaluate(fn, arg);
 
   await page.goto(`http://localhost:${PORT}/`, { waitUntil: 'load', timeout: 30000 });
-  await wait(2000);
-  await shot('boot');
+  await wait(2500);
+  await shot('main-menu');
 
-  await page.click('#start-btn').catch(() => notes.push('no #start-btn'));
-  await wait(1200);
+  // --- Garage ---------------------------------------------------------------
+  await mech(() => window.__mech?.level('garage'));
+  await wait(1800);
   await mech(() => window.__mech?.unlock());
   await wait(600);
-  await shot('after-clock-in');
+  await shot('garage-intro');
 
   // --- frame-time sampling over a few seconds of real rendering ---
   await mech(() => {
@@ -148,6 +149,43 @@ try {
   await mech(() => window.__mech?.openSettings());
   await wait(500);
   await shot('settings');
+  await page.keyboard.press('Escape');
+  await wait(400);
+
+  // --- Summer Mountains -----------------------------------------------------
+  await mech(() => window.__mech?.level('mountains'));
+  await wait(4000);
+  await mech(() => window.__mech?.unlock());
+  await wait(1200);
+  await shot('mtn-start');
+
+  const roadShot = async (name, t, lateral, yaw, pitch = 0) => {
+    await page.evaluate((a) => window.__mech?.roadTo(a.t, a.lateral, a.yaw, a.pitch), { t, lateral, yaw, pitch });
+    await wait(700);
+    return shot(name);
+  };
+  await roadShot('mtn-summit', 0.02, 0, 2.4, -0.05);
+  await roadShot('mtn-road-down', 0.12, 0, 1.2, -0.1);
+  await roadShot('mtn-cabin', 0.14, 9, -1.0, 0.0);
+  await roadShot('mtn-outward', 0.3, 0, -1.6, -0.15);
+  await roadShot('mtn-cave', 0.47, -14, 2.2, 0.05);
+  await roadShot('mtn-midroad', 0.62, 10, 0.4, -0.05);
+  await roadShot('mtn-lower', 0.85, 0, 1.0, -0.08);
+  await roadShot('mtn-exfil', 0.97, 0, 0.8, -0.02);
+
+  // repair panel + a repaired drive
+  await mech(() => window.__mech?.roadTo(0.035, 4, 0, 0));
+  await wait(500);
+  await shot('mtn-vehicle');
+  await mech(() => window.__mech?.fixAll());
+  await wait(700);
+  await shot('mtn-vehicle-fixed');
+  await mech(() => window.__mech?.enterKart?.());
+  await wait(300);
+  await mech(() => window.__mech?.drive({ fwd: true }));
+  await wait(2500);
+  await shot('mtn-driving');
+  await mech(() => window.__mech?.stop());
 
   notes.push(`captured ${shotN} screenshots to ${OUT}/`);
 } catch (e) {

@@ -30,6 +30,10 @@ export class Input {
       if (this.enabled && !this.locked) el.requestPointerLock();
     });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
+    // Mouse buttons are bindable too ("Mouse0"/"Mouse2"), so swing and block
+    // land where players expect them.
+    addEventListener('mousedown', this.onMouseDown);
+    addEventListener('mouseup', this.onMouseUp);
     document.addEventListener('pointerlockchange', () => {
       const was = this.locked;
       this.locked = document.pointerLockElement === el;
@@ -59,20 +63,15 @@ export class Input {
     this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
   };
 
-  private onKeyDown = (e: KeyboardEvent): void => {
-    if (this.rebindCapture) {
-      e.preventDefault();
-      const cb = this.rebindCapture;
-      this.rebindCapture = undefined;
-      if (e.code !== 'Escape') cb(e.code);
-      return;
-    }
-    if (!this.enabled) return;
-    const a = this.actionByCode.get(e.code);
+  /** Shared edge-trigger handling for a pressed action code. */
+  private press(code: string): void {
+    const a = this.actionByCode.get(code);
     if (!a) return;
     if (!this.held.has(a)) {
       if (a === 'interact') this.commands.push({ t: 'interact' });
       else if (a === 'drop') this.commands.push({ t: 'drop' });
+      else if (a === 'attack') this.commands.push({ t: 'attack' });
+      else if (a === 'use') this.commands.push({ t: 'useItem' });
       else if (a === 'pause') {
         if (this.locked) document.exitPointerLock();
         else this.onUnlock?.();
@@ -82,6 +81,18 @@ export class Input {
       }
     }
     this.held.add(a);
+  }
+
+  private onKeyDown = (e: KeyboardEvent): void => {
+    if (this.rebindCapture) {
+      e.preventDefault();
+      const cb = this.rebindCapture;
+      this.rebindCapture = undefined;
+      if (e.code !== 'Escape') cb(e.code);
+      return;
+    }
+    if (!this.enabled) return;
+    this.press(e.code);
     if (this.locked && (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')))
       e.preventDefault();
   };
@@ -90,6 +101,24 @@ export class Input {
     const a = this.actionByCode.get(e.code);
     if (a) this.held.delete(a);
     if (a === 'jump') this.jumpConsumed = false;
+  };
+
+  private onMouseDown = (e: MouseEvent): void => {
+    const code = 'Mouse' + e.button;
+    if (this.rebindCapture) {
+      const cb = this.rebindCapture;
+      this.rebindCapture = undefined;
+      cb(code);
+      return;
+    }
+    // Only while the game actually has the pointer, so menu clicks don't swing.
+    if (!this.enabled || !this.locked) return;
+    this.press(code);
+  };
+
+  private onMouseUp = (e: MouseEvent): void => {
+    const a = this.actionByCode.get('Mouse' + e.button);
+    if (a) this.held.delete(a);
   };
 
   private onWheel = (e: WheelEvent): void => {
@@ -115,6 +144,7 @@ export class Input {
     }
     it.crouch = h.has('crouch');
     it.sprint = h.has('sprint');
+    it.block = h.has('block');
     it.yaw = this.yaw;
     it.pitch = this.pitch;
     return it;

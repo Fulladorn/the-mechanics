@@ -95,6 +95,11 @@ function boot(): void {
         drainEvents();
       },
       setVariant: (socketId: string, variantId: string) => installPart(world.vehicle, socketId, variantId),
+      enterKart: () => {
+        world.player.mode = 'kart';
+        world.kart.occupied = true;
+        sfx.startEngine();
+      },
       drive: (p: Partial<Intent>) => {
         const it = makeIntent();
         Object.assign(it, p);
@@ -311,14 +316,17 @@ function loop(now: number): void {
     // client-derived audio cues (sim stays untouched)
     const pl = world.player;
     if (pl.mode === 'foot') {
-      if (!prevOnGround && pl.onGround) sfx.play('land');
-      else if (prevOnGround && !pl.onGround) sfx.play('jump');
+      if (!prevOnGround && pl.onGround) {
+        sfx.play('land');
+        view.footFx(Math.min(1.4, Math.abs(pl.vel.y) / 8 + 0.5));
+      } else if (prevOnGround && !pl.onGround) sfx.play('jump');
       if (pl.onGround) {
         const sp = Math.hypot(pl.vel.x, pl.vel.z);
         if (sp > 2.5) {
           stepAccum += sp * dt;
           if (stepAccum > 2.2) {
             sfx.play('footstep');
+            view.footFx(0.35);
             stepAccum = 0;
           }
         }

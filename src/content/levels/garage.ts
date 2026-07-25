@@ -91,6 +91,8 @@ export interface Exterior {
 
 export interface GarageLevel {
   bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** Key into SKY_PRESETS — drives sun angle, colour, fog and the IBL probe. */
+  skyPreset?: string;
   solids: Solid[];
   props: Prop[];
   gate: Box;
@@ -303,6 +305,7 @@ export function makeGarage(): GarageLevel {
 
   return {
     bounds: { minX: -28, maxX: 28, minZ: -24, maxZ: 20 },
+    skyPreset: 'summerDay',
     solids,
     props,
     gate: box(0, 1.6, 0, 3, 1.6, 0.5),
@@ -310,7 +313,7 @@ export function makeGarage(): GarageLevel {
     exterior: {
       skyTop: '#2c5a9e',
       skyHorizon: '#b9c6d6',
-      ground: 0x47503a,
+      ground: 0x6b8a45,
       fogColor: 0x9fb0c4,
       fogNear: 35,
       fogFar: 240,

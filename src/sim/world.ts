@@ -619,18 +619,9 @@ export class World {
         break;
       }
 
-      case 'repair': {
-        const s = target.socketId ? socketById(this.vehicle, target.socketId) : undefined;
-        if (!s || !s.broken) return;
-        this.activePuzzle = this.makePuzzle(s.id, s.broken);
-        this.events.push({
-          t: 'openPuzzle',
-          socketId: s.id,
-          puzzle: s.broken,
-          label: s.label ?? ITEM_DEFS[s.accepts].label,
-        });
+      case 'repair':
+        if (target.socketId) this.openRepairPuzzle(target.socketId);
         break;
-      }
 
       case 'paint': {
         const i = (PAINT_PALETTE.indexOf(this.vehicle.bodyColor) + 1) % PAINT_PALETTE.length;
@@ -665,6 +656,20 @@ export class World {
         this.win();
         break;
     }
+  }
+
+  /** Open a system's repair puzzle. Returns false if it isn't broken. */
+  openRepairPuzzle(socketId: string): boolean {
+    const s = socketById(this.vehicle, socketId);
+    if (!s || !s.broken) return false;
+    this.activePuzzle = this.makePuzzle(s.id, s.broken);
+    this.events.push({
+      t: 'openPuzzle',
+      socketId: s.id,
+      puzzle: s.broken,
+      label: s.label ?? ITEM_DEFS[s.accepts].label,
+    });
+    return true;
   }
 
   private completeStation(stationId?: string): void {

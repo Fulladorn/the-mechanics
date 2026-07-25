@@ -192,6 +192,12 @@ function installDebugBridge(): void {
       input.pitch = pitch;
       debugIntent = makeIntent();
     },
+    /** Open a specific repair puzzle without walking to it. */
+    openRepair: (socketId: string) => {
+      const ok = world.openRepairPuzzle(socketId);
+      drainEvents();
+      return ok;
+    },
     /** Stand `back` metres from the vehicle, looking straight at it. */
     faceVehicle: (back = 6, height = 1.2) => {
       const k = world.kart.pos;

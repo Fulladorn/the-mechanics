@@ -191,6 +191,15 @@ try {
   if (where) notes.push(`4x4 at ${where.vehicle.x.toFixed(1)},${where.vehicle.y.toFixed(1)},${where.vehicle.z.toFixed(1)}`);
   await wait(600);
   await shot('mtn-vehicle');
+  // the two new repair puzzles
+  for (const [socket, name] of [['brakes', 'puzzle-bolt'], ['coolant', 'puzzle-valve'], ['battery', 'puzzle-fuse']]) {
+    await page.evaluate((id) => window.__mech?.openRepair(id), socket);
+    await wait(700);
+    await shot(name);
+    await page.keyboard.press('Escape');
+    await wait(400);
+  }
+
   await mech(() => window.__mech?.fixAll());
   await wait(700);
   await shot('mtn-vehicle-fixed');

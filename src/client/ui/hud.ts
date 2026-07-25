@@ -61,7 +61,8 @@ export class Hud {
 
   setColorblind(on: boolean): void {
     this.colorblind = on;
-    this.hud.classList.toggle('cb', on);
+    // Set on <body> so the shell, puzzle overlays and HUD all repalette together.
+    document.body.classList.toggle('cb', on);
     this.specSig = '';
   }
 
@@ -200,13 +201,15 @@ export class Hud {
   }
 
   updateVitals(v: Vitals, integrity: number): void {
-    const sig = `${Math.round(v.hp)}|${v.cold.toFixed(2)}|${integrity.toFixed(2)}|${v.warming ? 1 : 0}`;
+    const sig = `${Math.round(v.hp)}|${v.cold.toFixed(2)}|${integrity.toFixed(2)}|${v.warming ? 1 : 0}|${this.colorblind ? 1 : 0}`;
     if (sig === this.vitalsSig) return;
     this.vitalsSig = sig;
 
     const hpPct = Math.max(0, (v.hp / v.maxHp) * 100);
     this.hpFill.style.width = `${hpPct}%`;
-    this.hpFill.style.background = hpPct > 55 ? '#4fd97e' : hpPct > 25 ? '#ffcf3f' : '#ff5d5d';
+    this.hpFill.style.background = this.colorblind
+      ? hpPct > 55 ? '#4ea9ff' : hpPct > 25 ? '#ffcf3f' : '#ff9a3c'
+      : hpPct > 55 ? '#4fd97e' : hpPct > 25 ? '#ffcf3f' : '#ff5d5d';
     this.hpVal.textContent = String(Math.max(0, Math.round(v.hp)));
 
     const coldPct = v.cold * 100;
@@ -215,7 +218,9 @@ export class Hud {
     this.coldRow.classList.toggle('warming', v.warming);
 
     this.integFill.style.width = `${integrity * 100}%`;
-    this.integFill.style.background = integrity > 0.5 ? '#5fd9c8' : integrity > 0.25 ? '#ffcf3f' : '#ff5d5d';
+    this.integFill.style.background = this.colorblind
+      ? integrity > 0.5 ? '#4ea9ff' : integrity > 0.25 ? '#ffcf3f' : '#ff9a3c'
+      : integrity > 0.5 ? '#5fd9c8' : integrity > 0.25 ? '#ffcf3f' : '#ff5d5d';
     this.integVal.textContent = `${Math.round(integrity * 100)}%`;
     this.integRow.classList.toggle('warn', integrity < 0.35);
   }

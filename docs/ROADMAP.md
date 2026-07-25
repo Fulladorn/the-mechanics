@@ -5,6 +5,31 @@
 
 ---
 
+## Where we actually are (2026-07)
+
+**Shipped as v1:** Phases 0–7 plus most of 10–11, single-player. The Garage and
+Summer Mountains are both playable start-to-finish, with menu/level select,
+progression, results and fail screens, settings + rebinding + gamepad, adaptive
+audio, and a full graphics pass. `npm test` runs headless start→win playthroughs
+of both missions; `npm run playtest` drives a real browser and captures every
+beat.
+
+**Deliberately deferred:**
+
+- **Phase 2 (multiplayer) and proximity voice.** The game deploys as a static
+  GitHub Pages bundle; there is no server to run the authoritative sim the
+  architecture assumes. The sim is DOM-free, seeded and `Math.random`-free
+  precisely so this can be added without rewriting gameplay.
+- **Phases 8–9 (Ocean, Moon).** Both are content on top of proven systems now:
+  `LevelDef` + the heightfield terrain, hazard, combat and puzzle modules are
+  already generic. Ocean needs swimming and a current force; Moon needs a
+  gravity scalar and an oxygen meter.
+- **Postgres profiles.** Progression is `localStorage`, which is the right
+  answer without accounts.
+
+The phase plan below is the original build order and is kept for context.
+
+
 ## Strategy
 
 Build **one complete vertical slice first** — the Garage tutorial + **Level 1

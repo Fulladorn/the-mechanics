@@ -27,11 +27,14 @@ export interface HazardDef {
 }
 
 export const DEFAULT_HAZARDS: Required<HazardDef> = {
-  coldAltitude: 26,
-  coldRate: 0.055,
+  // Tuned so exposure is a clock you have to respect, not a stopwatch: ~55 s of
+  // full exposure to freeze, then ~40 s before it's fatal. The earlier values
+  // killed you in half a minute at the summit, where the mission starts.
+  coldAltitude: 34,
+  coldRate: 0.018,
   warmRate: 0.42,
-  warmRadius: 7,
-  coldDamage: 5.5,
+  warmRadius: 8,
+  coldDamage: 2.5,
   safeFallSpeed: 13,
   fallDamagePerSpeed: 7.5,
   regen: 4.5,

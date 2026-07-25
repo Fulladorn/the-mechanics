@@ -128,23 +128,104 @@ export class Input {
     this.commands.push({ t: 'slot', n: this.slot });
   };
 
+  // --- gamepad --------------------------------------------------------------
+
+  /** Standard-mapping button indices we care about. */
+  private static PAD_BUTTONS: Record<number, Action> = {
+    0: 'jump',
+    1: 'drop',
+    2: 'interact',
+    3: 'use',
+    6: 'block',
+    7: 'attack',
+    10: 'sprint',
+    11: 'crouch',
+    9: 'pause',
+  };
+
+  private padPrev = new Set<number>();
+  private padHeld = new Set<Action>();
+  private padAxes = { x: 0, y: 0, lookX: 0, lookY: 0 };
+  padConnected = false;
+
+  /**
+   * Poll the first connected pad. Movement is thresholded because the sim's
+   * Intent is boolean; look is analog and integrated per frame. Called from the
+   * frame loop rather than from getIntent, so a pad can drive the game without
+   * the player having to click for pointer lock first.
+   */
+  poll(dt: number): void {
+    const pads = typeof navigator !== 'undefined' && navigator.getGamepads ? navigator.getGamepads() : [];
+    const pad = Array.from(pads).find((p): p is Gamepad => !!p && p.connected);
+    this.padConnected = !!pad;
+    if (!pad) {
+      this.padHeld.clear();
+      this.padAxes = { x: 0, y: 0, lookX: 0, lookY: 0 };
+      return;
+    }
+
+    const dead = (v: number) => (Math.abs(v) < 0.22 ? 0 : (v - Math.sign(v) * 0.22) / 0.78);
+    this.padAxes.x = dead(pad.axes[0] ?? 0);
+    this.padAxes.y = dead(pad.axes[1] ?? 0);
+    this.padAxes.lookX = dead(pad.axes[2] ?? 0);
+    this.padAxes.lookY = dead(pad.axes[3] ?? 0);
+
+    // Analog look, scaled to feel like the mouse sensitivity setting.
+    const look = this.settings.controls.sensitivity * 1400;
+    this.yaw -= this.padAxes.lookX * look * dt;
+    this.pitch -= this.padAxes.lookY * look * dt * (this.settings.controls.invertY ? -1 : 1);
+    const lim = Math.PI / 2 - 0.04;
+    this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
+
+    this.padHeld.clear();
+    for (const [idxStr, action] of Object.entries(Input.PAD_BUTTONS)) {
+      const idx = Number(idxStr);
+      const pressed = pad.buttons[idx]?.pressed ?? false;
+      if (pressed) this.padHeld.add(action);
+      // Edge-trigger the discrete actions exactly like a key press.
+      if (pressed && !this.padPrev.has(idx)) {
+        if (action === 'interact') this.commands.push({ t: 'interact' });
+        else if (action === 'drop') this.commands.push({ t: 'drop' });
+        else if (action === 'attack') this.commands.push({ t: 'attack' });
+        else if (action === 'use') this.commands.push({ t: 'useItem' });
+        else if (action === 'pause') this.onUnlock?.();
+      }
+      if (pressed) this.padPrev.add(idx);
+      else this.padPrev.delete(idx);
+    }
+    // shoulder buttons cycle the toolbelt
+    for (const [idx, dir] of [
+      [4, -1],
+      [5, 1],
+    ] as [number, number][]) {
+      const pressed = pad.buttons[idx]?.pressed ?? false;
+      if (pressed && !this.padPrev.has(idx)) {
+        this.slot = (this.slot + dir + 6) % 6;
+        this.commands.push({ t: 'slot', n: this.slot });
+      }
+      if (pressed) this.padPrev.add(idx);
+      else this.padPrev.delete(idx);
+    }
+  }
+
   getIntent(): Intent {
     const it = makeIntent();
     const h = this.held;
-    it.fwd = h.has('fwd');
-    it.back = h.has('back');
-    it.left = h.has('left');
-    it.right = h.has('right');
-    const jumpHeld = h.has('jump');
+    const p = this.padAxes;
+    it.fwd = h.has('fwd') || p.y < -0.3;
+    it.back = h.has('back') || p.y > 0.3;
+    it.left = h.has('left') || p.x < -0.3;
+    it.right = h.has('right') || p.x > 0.3;
+    const jumpHeld = h.has('jump') || this.padHeld.has('jump');
     if (this.settings.accessibility.autohop) {
       it.jump = jumpHeld;
     } else {
       it.jump = jumpHeld && !this.jumpConsumed;
       if (jumpHeld) this.jumpConsumed = true;
     }
-    it.crouch = h.has('crouch');
-    it.sprint = h.has('sprint');
-    it.block = h.has('block');
+    it.crouch = h.has('crouch') || this.padHeld.has('crouch');
+    it.sprint = h.has('sprint') || this.padHeld.has('sprint');
+    it.block = h.has('block') || this.padHeld.has('block');
     it.yaw = this.yaw;
     it.pitch = this.pitch;
     return it;

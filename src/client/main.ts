@@ -104,6 +104,28 @@ function installDebugBridge(): void {
     openSettings: () => menu.openSettings(true),
     openLore: () => openLore(),
     toMenu: () => toMenu(),
+    /** Renderer cost for the current scene — the meaningful perf signal when
+     *  the harness is running on a software rasteriser. */
+    stats: () => {
+      const info = view.renderer.info;
+      return {
+        drawCalls: info.render.calls,
+        triangles: info.render.triangles,
+        programs: info.programs?.length ?? 0,
+        geometries: info.memory.geometries,
+        textures: info.memory.textures,
+      };
+    },
+    /** Force the mission outcome, to inspect the results and fail cards. */
+    forceWin: () => {
+      for (const o of world.objectives.list) o.done = true;
+      world.events.push({ t: 'win' });
+      drainEvents();
+    },
+    forceFail: (reason: 'downed' | 'vehicle' | 'creep' = 'downed') => {
+      world.events.push({ t: 'fail', reason });
+      drainEvents();
+    },
     chock: () => {
       world.command({ t: 'interact' });
       world.chocked = true;
@@ -169,6 +191,23 @@ function installDebugBridge(): void {
       input.yaw = yaw;
       input.pitch = pitch;
       debugIntent = makeIntent();
+    },
+    /** Stand `back` metres from the vehicle, looking straight at it. */
+    faceVehicle: (back = 6, height = 1.2) => {
+      const k = world.kart.pos;
+      const yaw = Math.atan2(-back * 0.6, -back);
+      const x = k.x + Math.sin(yaw + Math.PI) * back;
+      const z = k.z + Math.cos(yaw + Math.PI) * back;
+      const p = world.player;
+      p.mode = 'foot';
+      p.pos.x = x;
+      p.pos.z = z;
+      p.pos.y = world.groundHeight(x, z) + height;
+      p.vel.x = p.vel.y = p.vel.z = 0;
+      input.yaw = Math.atan2(-(k.x - x), -(k.z - z));
+      input.pitch = -0.12;
+      debugIntent = makeIntent();
+      return { vehicle: { ...k }, player: { ...p.pos }, yaw: input.yaw };
     },
     /** Teleport along the mountain road: t in 0..1, lateral metres outward. */
     roadTo: (t: number, lateral = 0, yaw = 0, pitch = 0) => {
@@ -243,6 +282,8 @@ function startMission(id: string): void {
   sfx.stopEngine();
   dispatch.stop();
   sfx.resume();
+  sfx.setAmbience(world.level.terrain ? 'mountain' : 'garage');
+  sfx.setMood('calm');
   last = performance.now();
   dispatch.say(world.level.narrative.intro);
   intro.play(world.level.title, world.level.subtitle, () => app.requestPointerLock());
@@ -469,7 +510,10 @@ function loop(now: number): void {
   last = now;
   if (dt > 0.25) dt = 0.25;
 
-  const active = phase === 'playing' && !paused && (input.locked || forceActive);
+  // Poll the pad every frame: a controller player never touches the mouse, so
+  // pointer lock can't be what gates input.
+  if (phase === 'playing' && !paused && !puzzles.open && !menu.open) input.poll(dt);
+  const active = phase === 'playing' && !paused && (input.locked || forceActive || input.padConnected);
   if (active) {
     acc += dt;
     const intent = forceActive && debugIntent ? debugIntent : input.getIntent();

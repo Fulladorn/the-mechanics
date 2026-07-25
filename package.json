@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "shot": "node tools/shot.mjs",
+    "shot": "node tools/playtest.mjs --smoke",
     "playtest": "node tools/playtest.mjs"
   },
   "dependencies": {

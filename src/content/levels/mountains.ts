@@ -178,6 +178,13 @@ export function makeMountains(): LevelDef {
   const spawnPos = road(0.02, -2.5);
   const exfilPos = road(SITES.exfil.t, SITES.exfil.lateral);
 
+  // The previous shift's camp, still burning — the only warmth up here. Kept
+  // well clear of the 4x4 so its firelight doesn't wash out the hero prop you
+  // are supposed to be looking at when the mission opens.
+  const summitCamp = road(0.085, -10);
+  P('campfire', summitCamp);
+  P('crateStack', road(0.09, -12.5), 0.4);
+
   P('markerFlag', { x: exfilPos.x, y: exfilPos.y, z: exfilPos.z }, 0, 2);
   P('van', road(1.0, 14), facingIn(road(1.0, 14)), 1, 0x394b6b);
   P('yardLight', road(0.99, -12));
@@ -270,12 +277,15 @@ export function makeMountains(): LevelDef {
       { id: 'exfil', text: 'Drive the switchbacks down to the extraction lot', marker: exfilPos },
     ],
     hazards: {
-      coldAltitude: 24,
-      coldRate: 0.05,
+      coldAltitude: 34,
+      coldRate: 0.018,
       warmRate: 0.45,
       warmRadius: 8,
+      coldDamage: 2.5,
     },
-    warmth: [cabinA, cabinB, cabinC, { x: exfilPos.x, y: exfilPos.y, z: exfilPos.z }],
+    // The summit camp keeps the opening repair area survivable; everything
+    // above the tree line between the cabins is exposed.
+    warmth: [summitCamp, cabinA, cabinB, cabinC, { x: exfilPos.x, y: exfilPos.y, z: exfilPos.z }],
     wolves: [road(0.38, -26), road(0.56, 24), road(0.75, -22), road(0.68, 27)],
     puzzleSeed: 4242,
     narrative: {

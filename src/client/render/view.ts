@@ -11,7 +11,8 @@ import { Particles } from './particles';
 import { Viewmodel } from './viewmodel';
 import { M, chrome, glass, paint } from './materials';
 import { box, circle, cyl, plane, roundedBox, torus } from './geo';
-import { ANIMATED_KINDS, INSTANCED_KINDS, makeProp } from './props';
+import { ANIMATED_KINDS, INSTANCED_KINDS, SCATTER_KINDS, makeProp } from './props';
+import type { Prop, PropKind } from '../../content/levels/types';
 import { SKY_PRESETS, SkyRig, lightShaft } from './env';
 import { makeChassis, makePart } from './vehicleMesh';
 import { makeWolfMesh } from './wolfMesh';
@@ -72,8 +73,8 @@ export class GameView {
   // interpolation state
   private prevEye: Vec3;
   private curEye: Vec3;
-  private prevKart: { pos: Vec3; heading: number };
-  private curKart: { pos: Vec3; heading: number };
+  private prevKart: { pos: Vec3; heading: number; pitch: number; roll: number };
+  private curKart: { pos: Vec3; heading: number; pitch: number; roll: number };
 
   constructor(world: World, container: HTMLElement, settings: Settings) {
     this.world = world;
@@ -128,8 +129,8 @@ export class GameView {
     const eye = world.eyePos();
     this.prevEye = { ...eye };
     this.curEye = { ...eye };
-    this.prevKart = { pos: { ...world.kart.pos }, heading: world.kart.heading };
-    this.curKart = { pos: { ...world.kart.pos }, heading: world.kart.heading };
+    this.prevKart = { pos: { ...world.kart.pos }, heading: world.kart.heading, pitch: 0, roll: 0 };
+    this.curKart = { pos: { ...world.kart.pos }, heading: world.kart.heading, pitch: 0, roll: 0 };
 
     addEventListener('resize', this.onResize);
   }
@@ -748,6 +749,68 @@ export class GameView {
 
   // --- props ----------------------------------------------------------------
 
+  /**
+   * Turn a crowd of identical multi-mesh props into a handful of InstancedMesh
+   * draws. A few hundred pines built as Groups cost a draw call per branch —
+   * over a thousand on the mountain. Here each distinct (geometry, material)
+   * inside the prop becomes one instanced draw.
+   *
+   * `variants` templates are built and props are dealt between them, so the
+   * scatter keeps its per-prop jitter instead of becoming a copy-paste forest.
+   */
+  private instanceScatter(kind: PropKind, list: Prop[], variants = 4): boolean {
+    if (list.length < 8) return false;
+
+    interface Slot {
+      geo: THREE.BufferGeometry;
+      mat: THREE.Material;
+      local: THREE.Matrix4;
+    }
+    const templates: Slot[][] = [];
+    for (let v = 0; v < variants; v++) {
+      const tpl = makeProp({ kind, pos: { x: 0, y: 0, z: 0 } });
+      if (!tpl) return false;
+      tpl.updateMatrixWorld(true);
+      const slots: Slot[] = [];
+      tpl.traverse((o) => {
+        if (o instanceof THREE.Mesh) slots.push({ geo: o.geometry, mat: o.material as THREE.Material, local: o.matrixWorld.clone() });
+      });
+      if (!slots.length) return false;
+      templates.push(slots);
+    }
+
+    const buckets: Prop[][] = templates.map(() => []);
+    list.forEach((p, i) => buckets[i % variants].push(p));
+
+    const world = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const s = new THREE.Vector3();
+    const pos = new THREE.Vector3();
+    const out = new THREE.Matrix4();
+
+    templates.forEach((slots, v) => {
+      const bucket = buckets[v];
+      if (!bucket.length) return;
+      for (const slot of slots) {
+        const im = new THREE.InstancedMesh(slot.geo, slot.mat, bucket.length);
+        bucket.forEach((p, i) => {
+          q.setFromEuler(new THREE.Euler(0, p.rot ?? 0, 0));
+          s.setScalar(p.scale ?? 1);
+          pos.set(p.pos.x, p.pos.y, p.pos.z);
+          world.compose(pos, q, s);
+          out.multiplyMatrices(world, slot.local);
+          im.setMatrixAt(i, out);
+        });
+        im.instanceMatrix.needsUpdate = true;
+        im.castShadow = true;
+        im.receiveShadow = true;
+        im.computeBoundingSphere();
+        this.add(im);
+      }
+    });
+    return true;
+  }
+
   private buildProps(): void {
     const props = this.world.level.props;
 
@@ -766,8 +829,15 @@ export class GameView {
       0,
     );
 
+    // Instance the repeated scenery before falling through to one-off props.
+    const instanced = new Set<PropKind>();
+    for (const kind of SCATTER_KINDS) {
+      const of = props.filter((p) => p.kind === kind);
+      if (this.instanceScatter(kind, of)) instanced.add(kind);
+    }
+
     for (const p of props) {
-      if (INSTANCED_KINDS.has(p.kind)) continue;
+      if (INSTANCED_KINDS.has(p.kind) || instanced.has(p.kind)) continue;
       const o = makeProp(p);
       if (!o) continue;
       o.position.set(p.pos.x, p.pos.y, p.pos.z);
@@ -879,7 +949,7 @@ export class GameView {
             }
           }
           const light = a.o.getObjectByName('fireLight') as THREE.PointLight | undefined;
-          if (light) light.intensity = 12 + Math.sin(t * 9 + a.phase) * 3 + Math.sin(t * 23) * 1.5;
+          if (light) light.intensity = 6.5 + Math.sin(t * 9 + a.phase) * 1.6 + Math.sin(t * 23) * 0.8;
           if (Math.random() < dt * 14) {
             this.particles.emit(
               { x: (d.x as number) + (Math.random() - 0.5) * 0.3, y: (d.y as number) + 0.9, z: (d.z as number) + (Math.random() - 0.5) * 0.3 },
@@ -915,7 +985,12 @@ export class GameView {
     this.prevEye = this.curEye;
     this.curEye = { ...this.world.eyePos() };
     this.prevKart = this.curKart;
-    this.curKart = { pos: { ...this.world.kart.pos }, heading: this.world.kart.heading };
+    this.curKart = {
+      pos: { ...this.world.kart.pos },
+      heading: this.world.kart.heading,
+      pitch: this.world.kart.pitch,
+      roll: this.world.kart.roll,
+    };
   }
 
   frame(dt: number, alpha: number, yaw: number, pitch: number): void {
@@ -987,10 +1062,19 @@ export class GameView {
     const w = this.world;
     const kpos = {
       x: lerp(this.prevKart.pos.x, this.curKart.pos.x, alpha),
+      // The chassis origin sits on the ground, i.e. half a body below the
+      // kart's centre. Pinning this to 0 buried the vehicle on any terrain map.
+      y: lerp(this.prevKart.pos.y, this.curKart.pos.y, alpha) - w.kart.half.y,
       z: lerp(this.prevKart.pos.z, this.curKart.pos.z, alpha),
     };
-    this.kartGroup.position.set(kpos.x, 0, kpos.z);
-    this.kartGroup.rotation.y = lerpAngle(this.prevKart.heading, this.curKart.heading, alpha);
+    this.kartGroup.position.set(kpos.x, kpos.y, kpos.z);
+    // Yaw from the heading; pitch/roll from the slope under the wheels.
+    this.kartGroup.rotation.set(
+      lerp(this.prevKart.pitch, this.curKart.pitch, alpha),
+      lerpAngle(this.prevKart.heading, this.curKart.heading, alpha),
+      lerp(this.prevKart.roll, this.curKart.roll, alpha),
+      'YXZ',
+    );
     this.kartGroup.visible = !driving; // hide the chassis in first-person drive
 
     // (re)build a socket's mesh only when what's installed changes

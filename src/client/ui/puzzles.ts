@@ -22,6 +22,8 @@ export type PuzzleSpec =
 
 const OK = '#38e0c8';
 const BAD = '#ff7a6b';
+const OK_CB = '#4ea9ff';
+const BAD_CB = '#ff9a3c';
 
 export class PuzzleOverlay {
   private root: HTMLDivElement;
@@ -65,6 +67,13 @@ export class PuzzleOverlay {
 
   setColorblind(on: boolean): void {
     this.colorblind = on;
+  }
+
+  private get ok(): string {
+    return this.colorblind ? OK_CB : OK;
+  }
+  private get bad(): string {
+    return this.colorblind ? BAD_CB : BAD;
   }
 
   show(spec: PuzzleSpec, onSolved: () => void, onCancel: () => void): void {
@@ -273,10 +282,10 @@ export class PuzzleOverlay {
     needle.style.left = `${pct}%`;
     const good = inBand(bolt, this.torque);
     const over = this.torque > bolt.target + bolt.tolerance;
-    fill.style.background = good ? OK : over ? BAD : '#8794a8';
+    fill.style.background = good ? this.ok : over ? this.bad : '#8794a8';
     if (readout) {
       readout.textContent = `${Math.round(this.torque * 120)} Nm ${good ? '— IN BAND' : over ? '— OVER' : ''}`;
-      readout.style.color = good ? OK : over ? BAD : '#cdd5e0';
+      readout.style.color = good ? this.ok : over ? this.bad : '#cdd5e0';
     }
   }
 
@@ -301,12 +310,12 @@ export class PuzzleOverlay {
       const mark = document.createElement('u');
       mark.className = 'valve-mark';
       mark.style.left = `${Math.max(0, Math.min(1, r)) * 100}%`;
-      mark.style.background = ok ? OK : BAD;
+      mark.style.background = ok ? this.ok : this.bad;
       bar.append(safe, mark);
       const label = document.createElement('span');
       // Shape carries the state as well as the colour.
       label.textContent = `${['A', 'B', 'C'][i] ?? i + 1} ${ok ? '✓ OK' : '✕ OUT'}`;
-      label.style.color = ok ? OK : BAD;
+      label.style.color = ok ? this.ok : this.bad;
       g.append(label, bar);
       gauges.appendChild(g);
     });
@@ -337,7 +346,5 @@ export class PuzzleOverlay {
     });
     this.panel.appendChild(valves);
     this.panel.appendChild(this.footer('Every valve feeds more than one gauge'));
-
-    void this.colorblind; // states already carry shapes/labels unconditionally
   }
 }

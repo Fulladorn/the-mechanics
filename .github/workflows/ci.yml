@@ -15,7 +15,11 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      # CI runs typecheck/test/build only — no browser needed, and skipping the
+      # Chromium download keeps the job fast. `npm run playtest` is a local tool.
       - run: npm ci
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

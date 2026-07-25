@@ -7,6 +7,8 @@ import puppeteer from 'puppeteer';
 
 const argv = process.argv.slice(2);
 const HEAD = argv.includes('--head');
+// --smoke: boot both levels and assert no errors, skipping the full photo tour.
+const SMOKE = argv.includes('--smoke');
 const OUT = (() => {
   const i = argv.indexOf('--out');
   return i !== -1 && argv[i + 1] ? argv[i + 1] : 'screenshots';
@@ -103,6 +105,14 @@ try {
     requestAnimationFrame(tick);
   });
 
+  if (SMOKE) {
+    await mech(() => window.__mech?.level('mountains'));
+    await wait(4000);
+    await mech(() => window.__mech?.unlock());
+    await wait(1000);
+    await shot('smoke-mountains');
+    notes.push('smoke: both levels booted');
+  } else {
   await mech(() => window.__mech?.openGate());
   await pose('spawn-runway', 0, 15, 0, 0);
   await pose('door-exterior', 0, 16, Math.PI, -0.04);
@@ -111,6 +121,9 @@ try {
   await pose('welder', 4, -13, -0.5, 0.05);
   await pose('ceiling', 0, -8, 0, 0.75);
   await pose('floor-detail', -6, -9, 0.4, -0.85);
+
+  const garageStats = await mech(() => window.__mech?.stats());
+  if (garageStats) notes.push(`garage: ${garageStats.drawCalls} draws, ${(garageStats.triangles / 1000).toFixed(0)}k tris, ${garageStats.programs} shaders, ${garageStats.textures} textures`);
 
   const ft = await page.evaluate(() => window.__ft ?? []);
   if (ft.length > 20) {
@@ -173,9 +186,10 @@ try {
   await roadShot('mtn-lower', 0.85, 0, 1.0, -0.08);
   await roadShot('mtn-exfil', 0.97, 0, 0.8, -0.02);
 
-  // repair panel + a repaired drive
-  await mech(() => window.__mech?.roadTo(0.035, 4, 0, 0));
-  await wait(500);
+  // the hero prop, framed deterministically
+  const where = await mech(() => window.__mech?.faceVehicle(7));
+  if (where) notes.push(`4x4 at ${where.vehicle.x.toFixed(1)},${where.vehicle.y.toFixed(1)},${where.vehicle.z.toFixed(1)}`);
+  await wait(600);
   await shot('mtn-vehicle');
   await mech(() => window.__mech?.fixAll());
   await wait(700);
@@ -187,6 +201,24 @@ try {
   await shot('mtn-driving');
   await mech(() => window.__mech?.stop());
 
+  const mtnStats = await mech(() => window.__mech?.stats());
+  if (mtnStats) notes.push(`mountains: ${mtnStats.drawCalls} draws, ${(mtnStats.triangles / 1000).toFixed(0)}k tris, ${mtnStats.programs} shaders, ${mtnStats.textures} textures`);
+
+  // --- end-of-mission screens ------------------------------------------------
+  await mech(() => window.__mech?.forceFail('creep'));
+  await wait(700);
+  await shot('mtn-fail');
+  await mech(() => window.__mech?.level('mountains'));
+  await wait(3000);
+  await mech(() => window.__mech?.unlock());
+  await mech(() => window.__mech?.forceWin());
+  await wait(3200);
+  await shot('mtn-results');
+  await mech(() => window.__mech?.toMenu());
+  await wait(800);
+  await shot('menu-progressed');
+
+  }
   notes.push(`captured ${shotN} screenshots to ${OUT}/`);
 } catch (e) {
   errors.push('HARNESS: ' + e.message);

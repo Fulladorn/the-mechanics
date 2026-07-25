@@ -804,21 +804,22 @@ function campfire(): THREE.Group {
     s.scale.y = 0.7;
     g.add(at(s, Math.cos(a) * 0.85, 0.1, Math.sin(a) * 0.85));
   }
+  // Logs leaned into a tepee: short and tight, not long spokes on the ground.
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
-    const log = mesh(cyl(0.07, 0.09, 1.1, 6), paint({ color: 0x3a2a1c, roughness: 0.95 }));
-    log.rotation.set(1.1, a, 0);
-    g.add(at(log, Math.cos(a) * 0.2, 0.32, Math.sin(a) * 0.2));
+    const log = mesh(cyl(0.06, 0.08, 0.8, 6), paint({ color: 0x3a2a1c, roughness: 0.95 }));
+    log.rotation.set(0.55, a, 0);
+    g.add(at(log, Math.cos(a) * 0.16, 0.3, Math.sin(a) * 0.16));
   }
   const flame = new THREE.Group();
   flame.name = 'flame';
   for (let i = 0; i < 3; i++) {
-    const f = mesh(cone(0.26 - i * 0.06, 0.7 + i * 0.25, 6), M.glow(i === 0 ? 0xffb020 : 0xff7a1a, 3.4), false);
+    const f = mesh(cone(0.2 - i * 0.05, 0.42 + i * 0.16, 6), M.glow(i === 0 ? 0xffb020 : 0xff7a1a, 0.85), false);
     f.name = 'lick' + i;
-    flame.add(at(f, 0, 0.5 + i * 0.16, 0));
+    flame.add(at(f, 0, 0.42 + i * 0.12, 0));
   }
   g.add(flame);
-  const light = new THREE.PointLight(0xff9a3c, 14, 12, 2);
+  const light = new THREE.PointLight(0xff9a3c, 7, 9, 2);
   light.name = 'fireLight';
   g.add(at(light, 0, 0.9, 0));
   return g;
@@ -969,6 +970,22 @@ function markerFlag(): THREE.Group {
 
 /** Kinds cheap and numerous enough to be worth instancing (built by view.ts). */
 export const INSTANCED_KINDS = new Set<PropKind>(['grass', 'window']);
+/**
+ * Repeated scenery. Built once per template and drawn instanced — as Groups
+ * these alone cost over a thousand draw calls on the mountain.
+ */
+export const SCATTER_KINDS: PropKind[] = [
+  'pine',
+  'boulder',
+  'shrub',
+  'snowPatch',
+  'markerFlag',
+  'guardrail',
+  'rockSpire',
+  'tree',
+  'tire',
+  'crateStack',
+];
 /** Kinds view.ts animates each frame. */
 export const ANIMATED_KINDS = new Set<PropKind>([
   'fan', 'hangLamp', 'banner', 'bird', 'cloud', 'gauge', 'weldBot', 'campfire',

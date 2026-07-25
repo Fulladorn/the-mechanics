@@ -73,10 +73,11 @@ export class Post {
           // A soft radial billboard, not a hard sphere — a solid disc in the
           // sky reads as a bug, not as the sun.
           const sprite = new THREE.Mesh(
-            new THREE.PlaneGeometry(150, 150),
+            new THREE.PlaneGeometry(26, 26),
             new THREE.MeshBasicMaterial({
               map: sunTexture(),
               color: 0xfff3d8,
+              opacity: 0.55,
               transparent: true,
               depthWrite: false,
               blending: THREE.AdditiveBlending,
@@ -88,10 +89,10 @@ export class Post {
           scene.add(sprite);
           this.sunSprite = sprite;
           const god = new GodRaysEffect(camera, sprite, {
-            density: 0.86,
-            decay: 0.92,
-            weight: 0.32,
-            exposure: 0.5,
+            density: 0.82,
+            decay: 0.93,
+            weight: 0.22,
+            exposure: 0.34,
             samples: 48,
             blur: true,
           });

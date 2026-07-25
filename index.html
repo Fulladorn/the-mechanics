@@ -254,8 +254,23 @@
       #damage-fx.show { opacity: 1; }
       #damage-fx.cold { box-shadow: inset 0 0 160px 40px rgba(90, 160, 235, 0.7); }
 
-      /* colourblind mode: lean on the glyphs the HUD already emits */
-      #hud.cb .spec-row span:last-child { font-weight: 700; }
+      /*
+        Colourblind mode. Every state in this UI already carries a glyph or a
+        label, so the toggle's job is the palette: swap the red/green pair —
+        the hardest for deuteranopia and protanopia — for blue/orange, which
+        stays distinguishable across all three common types.
+      */
+      body.cb {
+        --accent2: #4ea9ff;
+        --danger: #ff9a3c;
+      }
+      body.cb .spec-row span:last-child { font-weight: 700; }
+      body.cb .spec-row.ok span:last-child { color: #4ea9ff; }
+      body.cb .spec-row.req span:last-child { color: #ff9a3c; }
+      body.cb #vitals .hp .bar i { filter: hue-rotate(150deg); }
+      body.cb .fuse-cell.on { background: #4ea9ff; box-shadow: 0 0 14px rgba(78,169,255,0.55); }
+      body.cb .torque-band,
+      body.cb .valve-safe { background: rgba(78,169,255,0.34); border-color: rgba(78,169,255,0.85); }
 
       /* ---------- Shell screens (menu / results / fail) ---------- */
       .shell-card {

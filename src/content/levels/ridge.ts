@@ -407,7 +407,7 @@ export function makeRidge(): LevelDef {
       start: (w) => {
         w.giveBelt('wrench');
         w.giveBelt('flashlight');
-        w.say('That’s it — the silver 4×4. Wait… is it MOVING? Chocks! Back of the van! Go go go!');
+        w.say('Client says his 4×4’s at the overlook, handbrake on. Easy one. …Wait. Is that thing MOVING? Chocks! Back of the van! GO!');
         w.setFlag('creeping');
       },
       done: (w) => w.systemOk(M, 'stabilize'),
@@ -833,7 +833,7 @@ export function makeRidge(): LevelDef {
     warmth: [fire],
     par: 1320,
     intro: 'ridge',
-    briefing: 'Kestrel Ridge. Client says his 4×4 is at the summit overlook — keys in it, handbrake on. Should be an easy one.',
+    briefing: '',
     tick: (w, dt) => {
       // The cold open: the truck creeps toward the drop until it's chocked.
       const v = car(w);

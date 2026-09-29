@@ -10,6 +10,7 @@ import { icon } from './ui/icons';
 import type { Input } from './input';
 import type { Settings } from './settings';
 import type { Audio } from './audio/audio';
+import { Cinematic, type Shot } from './cinematics';
 
 // One play session of one level: owns the World, its View and wires sim
 // events to sound, particles and HUD. The app shell (main.ts) creates one per
@@ -74,6 +75,7 @@ export class Game {
 
   frame(dt: number): void {
     const w = this.world;
+    this.stepIntro(dt);
     const active = !this.paused && !this.ended;
 
     for (const u of this.input.drainUi()) {
@@ -425,5 +427,51 @@ export class Game {
 
   setCinematic(pose: { pos: THREE.Vector3; quat: THREE.Quaternion } | null): void {
     this.cine = pose;
+  }
+
+  private intro: { cine: Cinematic; done: () => void; wasPaused: boolean } | null = null;
+
+  /** Play a scripted intro with the world paused; `done` fires after (or on skip). */
+  playIntro(shots: Shot[], done: () => void): void {
+    const cine = new Cinematic(shots);
+    this.intro = { cine, done, wasPaused: this.paused };
+    this.paused = true;
+    this.cineOverlay(true, cine.caption);
+    cine.update(0);
+    this.cine = cine.pose;
+  }
+
+  skipIntro(): void {
+    this.intro?.cine.skip();
+  }
+
+  get inIntro(): boolean {
+    return !!this.intro;
+  }
+
+  private stepIntro(dt: number): void {
+    const it = this.intro;
+    if (!it) return;
+    it.cine.update(dt);
+    this.cineOverlay(true, it.cine.caption);
+    if (it.cine.done) {
+      this.intro = null;
+      this.cine = null;
+      this.paused = it.wasPaused;
+      this.cineOverlay(false);
+      it.done();
+    }
+  }
+
+  private cineOverlay(on: boolean, caption?: [string, string]): void {
+    document.getElementById('letterbox')?.classList.toggle('on', on);
+    document.getElementById('skiphint')?.classList.toggle('hidden', !on);
+    const cap = document.getElementById('cinecap');
+    if (!cap) return;
+    cap.classList.toggle('show', on && !!caption);
+    if (caption) {
+      cap.querySelector('.a')!.textContent = caption[1];
+      cap.querySelector('.b')!.textContent = caption[0];
+    }
   }
 }

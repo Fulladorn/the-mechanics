@@ -17,6 +17,7 @@ import { Mixer } from './audio/mixer';
 import { makeIntent } from '../sim/world';
 import { gradeWorld } from '../sim/grade';
 import { LEVELS } from '../content/levels';
+import { INTROS } from './cinematics';
 import { CAMPAIGN, completeMission, loadProgress } from './progress';
 
 // Boot + the app flow: title (over a live backdrop) → contracts → loading →
@@ -37,6 +38,7 @@ let orbit = 0;
 let resumedAt = 0;
 let last = performance.now();
 let loadSeq = 0;
+let lastCheckpoint: string | null = null;
 
 const TIPS = [
   'Look at something and the prompt tells you what E will do. If it’s greyed out, it tells you why.',
@@ -126,7 +128,7 @@ function pickBackdrop(): string {
   return LEVELS[id]().attract ? id : 'depot';
 }
 
-async function play(id: string): Promise<void> {
+async function play(id: string, checkpoint?: string | null): Promise<void> {
   shell.hide();
   menu.close();
   await fade(true);
@@ -134,11 +136,34 @@ async function play(id: string): Promise<void> {
   backdrop = null;
   const g = await load(id, 'play');
   if (!g) return;
+  // hold the world still until the intro (or the player) takes over
+  g.paused = true;
   g.setCinematic(null);
-  input.enabled = true;
   hud.show(true);
-  hud.say(g.level.briefing);
+  if (checkpoint) {
+    g.world.restoreTo(checkpoint);
+    input.yaw = g.world.player.yaw;
+    input.pitch = 0;
+    hud.stampIt('CHECKPOINT', 'Picking up where you left off', 'warn');
+  }
+  const intro = !checkpoint ? INTROS[id] : undefined;
+  if (intro) {
+    input.enabled = false;
+    await fade(false);
+    g.playIntro(intro(g.world), () => {
+      g.paused = false;
+      input.yaw = g.world.player.yaw;
+      input.pitch = 0;
+      input.enabled = true;
+      if (g.level.briefing) hud.say(g.level.briefing);
+      input.lock();
+    });
+    return;
+  }
+  input.enabled = true;
+  if (!checkpoint && g.level.briefing) hud.say(g.level.briefing);
   await fade(false);
+  g.paused = false;
   input.lock();
 }
 
@@ -177,11 +202,12 @@ function failed(g: Game): void {
   input.enabled = false;
   document.exitPointerLock?.();
   hud.show(false);
-  shell.failed(g.world.failReason ?? 'downed', false);
+  lastCheckpoint = g.world.checkpoint;
+  shell.failed(g.world.failReason ?? 'downed', !!lastCheckpoint);
 }
 
 function pause(): void {
-  if (!game || !playing || menu.open || game.ended) return;
+  if (!game || !playing || menu.open || game.ended || game.inIntro) return;
   if (performance.now() - resumedAt < 250) return;
   game.paused = true;
   input.enabled = false;
@@ -230,6 +256,12 @@ async function boot(): Promise<void> {
   const wake = () => audio.resume();
   addEventListener('pointerdown', wake);
   addEventListener('keydown', wake);
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && game?.inIntro) {
+      e.preventDefault();
+      game.skipIntro();
+    }
+  });
   const apply = () => {
     input.applyBinds(settings);
     audio.applySettings(settings);
@@ -246,7 +278,9 @@ async function boot(): Promise<void> {
     settings: () => menu.openSettings(true),
     retry: () => {
       const id = playing ?? game?.level.id;
-      if (id) void play(id);
+      // after a failure, go back to the last checkpoint; a replay starts fresh
+      const cp = shell.screen === 'failed' ? lastCheckpoint : null;
+      if (id) void play(id, cp);
     },
     contracts: () => void toTitle('contracts'),
     title: () => void toTitle('title'),

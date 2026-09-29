@@ -168,6 +168,7 @@ async function play(id: string, checkpoint?: string | null): Promise<void> {
 }
 
 function finished(g: Game): void {
+  g.ended = true;
   const id = playing ?? g.level.id;
   const grade = gradeWorld(g.world);
   const lore = [...g.world.lore].map((l) => g.level.lore?.find((d) => d.id === l)?.title ?? l);
@@ -197,6 +198,7 @@ function mainVehicle(g: Game): string {
 }
 
 function failed(g: Game): void {
+  g.ended = true;
   menu.close();
   audio.duck(false);
   input.enabled = false;
@@ -253,6 +255,7 @@ async function boot(): Promise<void> {
   input = new Input(app, settings);
   hud = new Hud();
   audio = new Mixer(settings);
+  hud.onLine = (line, who) => audio.voice(line, who);
   const wake = () => audio.resume();
   addEventListener('pointerdown', wake);
   addEventListener('keydown', wake);

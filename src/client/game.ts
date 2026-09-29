@@ -354,7 +354,6 @@ export class Game {
         break;
       case 'say':
         h.say(e.line, e.who, e.priority);
-        a?.voice(e.line, e.who ?? 'Dispatch');
         break;
       case 'objective':
         h.objectivePop();

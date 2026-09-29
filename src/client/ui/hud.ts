@@ -76,20 +76,41 @@ export class Hud {
 
   // --- messages -------------------------------------------------------------------
 
+  /**
+   * Radio lines never get lost: story lines (priority 1) queue ahead of idle
+   * hints and cut a hint short; urgent lines (2+) interrupt; hints wait.
+   */
   say(line: string, who = 'Dispatch', priority = 1): void {
     if (!line) return;
-    if (this.radioTimer > 0 && priority < 1) {
-      this.queue.push({ line, who, priority });
+    if (this.radioTimer <= 0) {
+      this.showLine(line, who, priority);
       return;
     }
-    this.showLine(line, who);
+    if (priority >= 2) {
+      this.showLine(line, who, priority);
+      return;
+    }
+    if (priority >= 1) {
+      const at = this.queue.findIndex((q) => q.priority < 1);
+      this.queue.splice(at < 0 ? this.queue.length : at, 0, { line, who, priority });
+      if (this.shownPriority < 1) this.radioTimer = Math.min(this.radioTimer, 0.6);
+      return;
+    }
+    // don't pile up stale hints
+    if (this.queue.length < 3) this.queue.push({ line, who, priority });
   }
 
-  private showLine(line: string, who: string): void {
+  private shownPriority = 1;
+  /** Called as each radio line actually appears (the voice follows the text). */
+  onLine?: (line: string, who: string) => void;
+
+  private showLine(line: string, who: string, priority = 1): void {
+    this.onLine?.(line, who);
     this.radioWho.textContent = who;
     this.radioLine.textContent = line;
     this.radio.classList.add('show');
-    this.radioTimer = 2.2 + line.length * 0.055;
+    this.shownPriority = priority;
+    this.radioTimer = 2.4 + line.length * 0.055;
   }
 
   stampIt(text: string, sub = '', tone: 'good' | 'warn' | 'bad' = 'good'): void {
@@ -143,7 +164,7 @@ export class Hud {
       this.radioTimer -= dt;
       if (this.radioTimer <= 0) {
         const next = this.queue.shift();
-        if (next) this.showLine(next.line, next.who);
+        if (next) this.showLine(next.line, next.who, next.priority);
         else this.radio.classList.remove('show');
       }
     }

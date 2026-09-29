@@ -1,133 +1,143 @@
 # The Mechanics
 
-> You and your friends are an expert team of Mechanics. You get dropped into
-> remote, hostile locations to repair a vehicle and drive it to safety. Gather,
-> build, repair, survive — then get out.
+> A game about fixing things in bad places.
 
-**The Mechanics** is a first-person survival puzzle game that runs in the
-browser — no install, no download. Each mission drops you into a hostile place
-with a broken vehicle: scavenge the parts, solve hands-on repair puzzles, fend
-off whatever lives there, then drive the fixed-up vehicle to the exfil point
-before the elements finish you.
+**The Mechanics** is a first-person, hands-on repair game that runs in the
+browser. You're the Company's newest mechanic. They send you to broken
+vehicles in remote places, and you get them home. You undo real bolts, jack
+up real axles, clip battery terminals in the right order, bleed cooling
+systems, scavenge parts off whatever the landscape has left lying around, and
+drive the thing out before dark.
 
-v1 ships two missions — the Garage and Summer Mountains — as a single-player
-campaign. Ocean and the Moon, and the co-op the design is built around, are
-next.
-
-Think **Surgeon Simulator**'s tactile chaos meets **Raft**'s co-op survival and
-**The Long Drive**'s "fix it and go" loop, with the cartoony jank of **Totally
-Reliable Delivery Service**.
+The art is painterly and stylized: warm sun, violet shadows, puffy clouds,
+wind in the grass, chunky characterful vehicles.
 
 ---
 
-## Status
+## What's in the box
 
-🟢 **v1.0 — shippable single-player campaign: two missions, start to finish.**
+**Orientation Day (tutorial, ~8 min).** It's your first shift at Depot 7.
+- Punch in, get your tools from your locker, and meet Betsy, the Company's
+  practice pickup.
+- Inspect her, then fix her: jack her up and swap a flat tyre, swap the dead
+  battery (black terminal off first), sort the scrambled fuse box, and fill
+  the tank.
+- Drive the cone course in the yard and park in the bay.
+- It can't be failed. A few secrets are hidden behind the hall for players
+  who like to climb.
 
-**Mission 0 — The Garage (training).** A lived-in workshop under a real roof,
-opening onto a yard of parked vans, pines and drifting cloud. Learn to move,
-bunny-hop a speed gate, scavenge parts and *build your own vehicle* — part
-variants change both the look and the driving stats (top speed / accel / grip /
-durability) on a live spec sheet — then drive your build through a checkpoint
-loop and clock out. No fail state.
+**The Ridge Job (Level 1, ~20–30 min).** A private client's 4×4 has been left
+at the summit overlook on Kestrel Ridge, and as you arrive it starts rolling
+toward the drop.
+- **The cold open.** Chock it before it goes over.
+- **The diagnosis.** Someone sabotaged it on purpose: a shredded tyre, a
+  cracked battery, split hoses, an empty tank, and scrambled ignition fuses.
+- **The scavenge.**
+  - Take a wheel off the ranger's pickup, which is up on blocks.
+  - Ride the ranger's quad (its cargo rack holds four parts).
+  - Get the old sawmill's generator running to open the shed and pull the
+    logging truck's battery.
+  - Raid an RV at the lake for hoses, and siphon its fuel as dusk brings the
+    wolves out.
+- **The repair.** Fit it all:
+  - battery and terminals
+  - fuel line, then fill up
+  - radiator hose, coolant, and bleed the air out with the valve panel
+  - the ignition fuse grid
+- **The descent.** Drive down in the dark with headlights. A rockslide
+  closes the road, so you ford the creek on the logging track instead.
+- **Optional extras** grade you higher:
+  - a winch from the abandoned mine and a light bar from the fire lookout
+  - three logs that start to explain who did this, and why
 
-**Mission 1 — Summer Mountains.** A client's 4×4 is rolling toward a cliff edge
-near the summit. Chock it before it goes over, then get five critical systems
-back to GO: find a spare wheel and a fuel can across three mountain cabins, and
-fix the battery, brakes and coolant loop with three hands-on repair puzzles
-(fuse grid, bolt torque, valve balance). Wolves work the treeline, cold bites
-above the tree line, and a cave holds a log the last team left behind. Then
-drive the switchbacks down without putting it over an edge.
+**Around it:**
+- A title screen over a live 3D backdrop and a contract board.
+- Graded results (S–D) based on time, vehicle condition, finds, extra work
+  and injuries. Best grades are saved.
+- Retry from checkpoint.
+- Pause and full settings: video, audio, rebindable controls and
+  accessibility (a wider torque band, reading Dispatch aloud, and toggles
+  for head bob and shake).
+- Sound: recorded foley plus a synthesized engine, ambience, a radio voice
+  and a generative plucked score.
 
-The connective tissue: main menu with unlock-gated mission select, results and
-mission-failed screens, best times, per-mission integrity and lore tracking,
-pause menu, full settings (video / audio / controls with rebinding, including
-mouse buttons / accessibility), gamepad support, Dispatch narration with
-subtitles, and adaptive procedural music that shifts on tension and triumph.
-
-**Graphics.** Physically-based sky with sun-driven lighting and an IBL probe
-baked from that sky; a shared bevelled-geometry and PBR material kit; a
-heightfield mountain whose collision and visuals come from one function;
-volumetric light shafts; god rays, colour grading, AO, bloom and grain; smoke
-and dust particles; first-person hands with sway, bob and landing dip.
-
-Co-op is designed for but not in v1 — the sim is DOM-free and deterministic so
-an authoritative server can be dropped in, but the game ships as a static page
-with no server to run one.
-
-- [`docs/GAME_DESIGN.md`](docs/GAME_DESIGN.md) — the complete game design document (what we're building)
-- [`docs/TECH_ARCHITECTURE.md`](docs/TECH_ARCHITECTURE.md) — the engineering plan (how we build it)
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — phased milestones, vertical slice first, with acceptance criteria
-
-## The pitch in one screen
+## How it plays
 
 | | |
 |---|---|
-| **Genre** | Co-op survival puzzle (first-person) |
-| **Players** | 1 in v1 (co-op designed for; see Status) |
-| **Session** | ~10–25 min per mission |
-| **Audience** | Streamers & Discord groups — share a URL, share a code, play |
-| **Loop** | Drop in → scavenge → repair (puzzles + physics) → defend → drive to exfil |
-| **Hook** | Skill-based movement (bunny-hop/crouch-jump), tactile co-op repairs, a creeping mystery |
-| **Style** | Colorful, cartoony, deliberately wonky physics |
-| **Platform** | Web (TypeScript + Three.js); no install, no download |
+| **Look & E** | The prompt always says what E will do. A greyed-out prompt says why it can't yet. |
+| **Hold E** | Hold actions: inspect, pump the jack, pour, pull a start cord. |
+| **LMB on a bolt** | Wrench it. Loosening is a short hold. Tightening is a torque gauge: let go in the green, or it slips. |
+| **Carrying** | Wheels and batteries go in your hands and slow you down. Tap **G** to drop, hold **G** to throw. Tools live on a 4-slot belt (**1–4**). |
+| **Parts** | Seat a part in the glowing ghost slot, then bolt it down. |
+| **Tab** | The job sheet: every system, what's wrong with it, and the next step. |
+| **Vehicles** | **W/S** drive, **Space** handbrake, **V** chase/cockpit camera, **L** lights, **H** horn, **R** flip back over. |
+| **Other** | **F** flashlight. Flares (**LMB** with one selected) keep wolves away. **Esc** pause. Gamepad works too. |
 
-## Tech at a glance
+## Tech
 
-- **Client:** TypeScript + Vite + Three.js. Every asset is procedural — textures,
-  props, vehicles and terrain are generated in code, so the whole game is a
-  ~340 kB gzipped bundle with no downloads.
-- **Physics:** a small deterministic AABB + heightfield resolver in `sim/`
-  (swept axis-by-axis, with step-up). No WASM, no native deps.
-- **Shared core:** one DOM-free, `Math.random`-free `sim/` runs the game; the
-  client renders it and the tests run it headless. Ready for an authoritative
-  server without changes.
-- **Persistence:** `localStorage` — mission unlocks, best times, integrity, lore.
-- **Verification:** vitest unit suite + headless start→win playthroughs of both
-  missions + a Puppeteer screenshot tour (`npm run playtest`).
-
-See [`docs/TECH_ARCHITECTURE.md`](docs/TECH_ARCHITECTURE.md) for the full rationale.
+- **TypeScript + Vite + three.js**, plus `postprocessing` and N8AO for the
+  frame (AO, SMAA, bloom, colour grade, ACES).
+- **Rapier** (WASM) for physics:
+  - a heightfield terrain collider
+  - a kinematic character controller for the player
+  - raycast-vehicle suspension for the trucks and the quad
+  - dynamic bodies for everything you drop or throw
+- **A DOM-free simulation** (`src/sim/`). The same code runs in the browser
+  and in the tests.
+  - Machines are data: slots, bolts, covers, terminals, fluids, jacks and
+    puzzle panels. The job sheet is derived from their state, never
+    scripted.
+  - Missions are beat lists with checkpoints.
+- **Procedural art.**
+  - Vehicles, buildings and props are built from bevelled primitives and
+    profile extrusions.
+  - One authored terrain grid feeds the collider, the mesh, the grass and
+    the gameplay queries.
+  - Stylized materials patch three's standard shader: wrap lighting, rim
+    light, sun-tinted height fog and wind.
+  - GPU grass, instanced foliage, depth-tinted water and a time-of-day sky.
+- **Performance target:** 60 fps at the Medium preset on an RTX 5060-class
+  GPU. Integrated graphics aren't a target; Low exists for them anyway.
 
 ## Quick start
 
 ```bash
 npm install
-npm run dev        # Vite dev server on http://localhost:5173
-# open it, pick The Garage, and play
+npm run dev        # http://localhost:5173
 ```
-
-Other scripts:
 
 ```bash
-npm test           # vitest: sim units + headless playthroughs of both missions
-npm run typecheck  # tsc --noEmit
+npm test           # vitest: sim units + headless start-to-finish playthroughs of both levels
+npm run typecheck
 npm run build      # production build to dist/
-npm run shot       # fast headless smoke: boot both levels, assert no errors
-npm run playtest   # full scripted playthrough in a real browser, screenshots
-                   # of every beat to screenshots/, plus draw-call/triangle counts
+npm run playtest   # browser tour of both levels and the menus, screenshots to screenshots/
+npm run shot       # the same, as a quick smoke test (no screenshots)
 ```
 
-**Controls:** `WASD` move · mouse look · `Space` jump (hold to bunny-hop) ·
-`Shift` sprint · `Ctrl` crouch · `E` interact/pickup · `G` drop · `LMB` swing ·
-`RMB` block · `F` use item · `1–6`/scroll toolbelt · `Esc` pause. Everything is
-rebindable, and a gamepad works out of the box. Build speed by holding `Space`
-and air-strafing (`A`/`D` + mouse) to open the speed gate.
+Dev URLs:
+- `?level=depot` or `?level=ridge` skips the menus.
+- `?q=low|med|high` sets the quality preset.
+- In dev builds, `window.__mech` exposes a debug bridge (teleport, time of
+  day, camera, finish or fail).
 
-## Repository layout
+## Layout
 
 ```
-the-mechanics/
-├── docs/            # design + engineering plan (start here)
-├── src/
-│   ├── shared/      # protocol, types, constants, math (no deps on client/server)
-│   ├── sim/         # deterministic, DOM-free game core (the source of truth)
-│   ├── client/      # Three.js renderer, input, UI, audio, progression
-│   └── content/     # data-driven levels, parts catalog, narrative scripts
-├── test/            # vitest specs incl. headless mission playthroughs
-└── tools/           # playtest.mjs — scripted browser playthrough + screenshots
+src/
+  sim/        physics, player, items, machines (repair model), vehicles, world, grading
+  content/    levels (depot, ridge + its terrain), vehicle/machine definitions, level kit
+  client/     game session, app shell, input, settings, progress, cinematics
+    render/   renderer, stylized materials, sky, terrain, grass, foliage, water,
+              wolves, vehicles, props, highlight, camera rig, post
+    ui/       HUD, menus, shell screens
+    audio/    the mixer (samples + synthesis)
+test/         unit specs + headless playthroughs (test/bot.ts drives the real input pipeline)
+tools/        playtest.mjs (browser tour), shot.mjs (ad-hoc screenshots), probe-terrain.ts
+public/audio/ Kenney CC0 foley (see CREDITS.md)
 ```
 
-## License
+## Credits
 
-TBD. Third-party art assets retain their own licenses (tracked in
-`content/assets/CREDITS.md` once added).
+Foley by [Kenney](https://kenney.nl) (CC0). Type: Barlow Condensed and Inter
+(SIL OFL). Everything else is generated in code.

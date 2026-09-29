@@ -10,18 +10,45 @@ import * as THREE from 'three';
 import { loadSettings, type Settings } from './settings';
 import { Input } from './input';
 import { Hud } from './ui/hud';
+import { Menu } from './ui/menu';
+import { Shell } from './ui/shell';
 import { Game } from './game';
+import { Mixer } from './audio/mixer';
 import { makeIntent } from '../sim/world';
+import { gradeWorld } from '../sim/grade';
 import { LEVELS } from '../content/levels';
+import { CAMPAIGN, completeMission, loadProgress } from './progress';
 
-// Boot + app loop. (The full title/contract/results shell wraps this.)
+// Boot + the app flow: title (over a live backdrop) → contracts → loading →
+// play → results / failure → back round again.
 
 const app = document.getElementById('app')!;
 let settings: Settings;
 let input: Input;
 let hud: Hud;
+let audio: Mixer;
+let menu: Menu;
+let shell: Shell;
 let game: Game | null = null;
+/** The contract being played (null on the title backdrop). */
+let playing: string | null = null;
+let backdrop: string | null = null;
+let orbit = 0;
+let resumedAt = 0;
 let last = performance.now();
+let loadSeq = 0;
+
+const TIPS = [
+  'Look at something and the prompt tells you what E will do. If it’s greyed out, it tells you why.',
+  'Hold <b>Tab</b> for the job sheet: every system on the vehicle, and the next step for each.',
+  'Torque bolts with the wrench: hold the mouse button and let go while the needle is in the green.',
+  'Negative terminal off first, on last. Your fingers will thank you.',
+  'Heavy parts slow you down. Toss them with a long press of <b>G</b>.',
+  'Wolves won’t come near a lit flare.',
+  'In a vehicle, <b>V</b> swaps between the chase and cockpit cameras.',
+  'Stuck on its roof? <b>R</b> rights a vehicle when it’s stopped.',
+  'The Company pays the same whether you find the extra stuff or not. Your grade doesn’t.',
+];
 
 function loading(k: number, msg: string): void {
   const el = document.getElementById('loading')!;
@@ -30,22 +57,151 @@ function loading(k: number, msg: string): void {
   el.querySelector('.msg')!.textContent = msg;
 }
 
-async function start(id: string): Promise<void> {
-  const make = LEVELS[id] ?? LEVELS.sandbox;
+function fade(on: boolean): Promise<void> {
+  document.getElementById('fade')!.classList.toggle('on', on);
+  return new Promise((r) => setTimeout(r, on ? 620 : 0));
+}
+
+async function load(id: string, mode: 'play' | 'backdrop'): Promise<Game | null> {
+  const seq = ++loadSeq;
+  const make = LEVELS[id] ?? LEVELS.depot;
+  const lv = make();
+  if (mode === 'play') {
+    const tip = document.querySelector('#loading .tip') as HTMLElement;
+    tip.innerHTML = `<b>Tip</b>${TIPS[Math.floor(Math.random() * TIPS.length)]}`;
+    (document.querySelector('#loading .logo') as HTMLElement).innerHTML = lv.title.toUpperCase().replace(/(\S+)$/, '<em>$1</em>');
+  } else {
+    (document.querySelector('#loading .logo') as HTMLElement).innerHTML = 'THE <em>MECHANICS</em>';
+    (document.querySelector('#loading .tip') as HTMLElement).innerHTML = '';
+  }
+  loading(0.02, 'Loading');
   game?.dispose();
   game = null;
-  loading(0.02, 'Loading');
-  const g = new Game(make(), settings, input, hud, null, {
-    onWin: () => hud.stampIt('JOB DONE'),
-    onFail: () => hud.stampIt('FAILED', '', 'bad'),
-    onPause: () => {},
+  audio.stopAll();
+  hud.show(false);
+  const g = new Game(lv, settings, input, hud, audio, {
+    onWin: (gg) => setTimeout(() => gg === game && finished(gg), 2600),
+    onFail: (gg) => setTimeout(() => gg === game && failed(gg), 2200),
+    onPause: () => pause(),
   });
   await g.init(app, loading);
+  if (seq !== loadSeq) {
+    g.dispose();
+    return null;
+  }
   game = g;
   document.getElementById('loading')!.style.display = 'none';
+  return g;
+}
+
+// --- screens ------------------------------------------------------------------------
+
+async function toTitle(screen: 'title' | 'contracts' = 'title'): Promise<void> {
+  playing = null;
+  menu.close();
+  input.enabled = false;
+  document.exitPointerLock?.();
+  const id = pickBackdrop();
+  if (!game || backdrop !== id || game.level.id !== id) {
+    await fade(true);
+    const g = await load(id, 'backdrop');
+    if (!g) return;
+    backdrop = id;
+    const a = g.level.attract;
+    if (a?.hour !== undefined) g.world.hour = a.hour;
+    g.paused = true;
+    await fade(false);
+  }
+  if (game) game.paused = true;
+  hud.show(false);
+  if (screen === 'title') shell.title(loadProgress());
+  else shell.contracts(loadProgress());
+}
+
+function pickBackdrop(): string {
+  // The latest unlocked contract that has a backdrop shot.
+  const p = loadProgress();
+  let id = 'depot';
+  for (const m of CAMPAIGN) if (LEVELS[m.id] && (!m.requires || p.missions[m.requires]?.completed)) id = m.id;
+  return LEVELS[id]().attract ? id : 'depot';
+}
+
+async function play(id: string): Promise<void> {
+  shell.hide();
+  menu.close();
+  await fade(true);
+  playing = id;
+  backdrop = null;
+  const g = await load(id, 'play');
+  if (!g) return;
+  g.setCinematic(null);
+  input.enabled = true;
   hud.show(true);
   hud.say(g.level.briefing);
+  await fade(false);
+  input.lock();
 }
+
+function finished(g: Game): void {
+  const id = playing ?? g.level.id;
+  const grade = gradeWorld(g.world);
+  const lore = [...g.world.lore].map((l) => g.level.lore?.find((d) => d.id === l)?.title ?? l);
+  const run = completeMission(id, {
+    time: g.world.elapsed,
+    integrity: g.world.vehicles.get(mainVehicle(g))?.integrity ?? 1,
+    loreFound: g.world.lore.size > 0,
+    grade: grade.letter,
+    score: grade.score,
+    lore: [...g.world.lore],
+  });
+  menu.close();
+  audio.duck(false);
+  input.enabled = false;
+  document.exitPointerLock?.();
+  hud.show(false);
+  shell.results(
+    CAMPAIGN.find((m) => m.id === id),
+    grade,
+    run,
+    lore,
+  );
+}
+
+function mainVehicle(g: Game): string {
+  return [...g.world.placements.values()].find((p) => p.vehicle && p.def.inspect)?.key ?? '';
+}
+
+function failed(g: Game): void {
+  menu.close();
+  audio.duck(false);
+  input.enabled = false;
+  document.exitPointerLock?.();
+  hud.show(false);
+  shell.failed(g.world.failReason ?? 'downed', false);
+}
+
+function pause(): void {
+  if (!game || !playing || menu.open || game.ended) return;
+  if (performance.now() - resumedAt < 250) return;
+  game.paused = true;
+  input.enabled = false;
+  document.exitPointerLock?.();
+  menu.subtitle = `${game.level.title} — ${game.world.objectiveText()?.text ?? ''}`;
+  menu.openPause();
+  audio.duck(true);
+}
+
+function resume(): void {
+  menu.close();
+  resumedAt = performance.now();
+  if (!game) return;
+  game.paused = false;
+  input.enabled = true;
+  input.lock();
+  audio.duck(false);
+}
+
+// --- loop -----------------------------------------------------------------------------
 
 function loop(now: number): void {
   requestAnimationFrame(loop);
@@ -53,6 +209,16 @@ function loop(now: number): void {
   last = now;
   if (dt > 0.1) dt = 0.1;
   input.poll(dt);
+  if (game && !playing) {
+    // title backdrop: slow orbit
+    const a = game.level.attract;
+    if (a) {
+      orbit += dt * (a.speed ?? 0.04);
+      const from = new THREE.Vector3(a.target.x + Math.sin(orbit) * a.radius, a.target.y + a.height, a.target.z + Math.cos(orbit) * a.radius);
+      const m = new THREE.Matrix4().lookAt(from, new THREE.Vector3(a.target.x, a.target.y, a.target.z), new THREE.Vector3(0, 1, 0));
+      game.setCinematic({ pos: from, quat: new THREE.Quaternion().setFromRotationMatrix(m) });
+    }
+  }
   game?.frame(dt);
 }
 
@@ -60,17 +226,53 @@ async function boot(): Promise<void> {
   settings = loadSettings();
   input = new Input(app, settings);
   hud = new Hud();
+  audio = new Mixer(settings);
+  const wake = () => audio.resume();
+  addEventListener('pointerdown', wake);
+  addEventListener('keydown', wake);
+  const apply = () => {
+    input.applyBinds(settings);
+    audio.applySettings(settings);
+    game?.applySettings(settings);
+  };
+  menu = new Menu(settings, input, {
+    onResume: () => resume(),
+    onRestart: () => playing && play(playing),
+    onQuit: () => toTitle('contracts'),
+    apply,
+  });
+  shell = new Shell({
+    play: (id) => void play(id),
+    settings: () => menu.openSettings(true),
+    retry: () => {
+      const id = playing ?? game?.level.id;
+      if (id) void play(id);
+    },
+    contracts: () => void toTitle('contracts'),
+    title: () => void toTitle('title'),
+    sfx: (n) => audio.play(n),
+  });
+  input.onUnlock = () => {
+    // Esc in a browser drops the pointer lock before the key reaches us.
+    if (playing && game && !game.paused && !game.ended && !game.world.panel) pause();
+  };
   const params = new URLSearchParams(location.search);
   if (params.get('q')) settings.video.quality = params.get('q') as Settings['video']['quality'];
   if (import.meta.env.DEV) installDebug();
   requestAnimationFrame(loop);
-  await start(params.get('level') ?? 'sandbox');
+  const direct = params.get('level');
+  if (direct && direct !== 'title') await play(direct);
+  else await toTitle();
 }
 
 function installDebug(): void {
   const bridge = {
     game: () => game,
-    level: (id: string) => start(id),
+    level: (id: string) => play(id),
+    title: (s: 'title' | 'contracts' = 'title') => toTitle(s),
+    finish: () => game && finished(game),
+    fail: () => game && failed(game),
+    pause: () => pause(),
     teleport: (x: number, z: number, yaw = 0, pitch = 0, y?: number) => {
       if (!game) return;
       game.world.teleport({ x, y: y ?? game.world.terrain.heightAt(x, z), z }, yaw, pitch);

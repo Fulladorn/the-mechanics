@@ -25,6 +25,8 @@ try {
   for (const s of steps) {
     if (s.eval) await page.evaluate(s.eval);
     await wait(s.wait ?? 800);
+    // SwiftShader can take seconds per frame: make sure a few real frames landed.
+    await page.evaluate(() => new Promise((r) => { let n = 0; const f = () => (++n >= (window.__shotFrames ?? 3) ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); }));
     if (s.shot) { await page.screenshot({ path: `${out}/${String(++n).padStart(2, '0')}-${s.shot}.png` }); }
     if (s.log) console.log(s.log, JSON.stringify(await page.evaluate(s.logEval)));
   }

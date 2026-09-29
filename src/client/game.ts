@@ -59,6 +59,10 @@ export class Game {
     progress(1, 'Ready');
   }
 
+  applySettings(s: Settings): void {
+    this.view.applySettings(s);
+  }
+
   dispose(): void {
     this.input.cursorMode = false;
     this.input.onCursor = undefined;

@@ -99,6 +99,7 @@ export function makeDepot(): LevelDef {
   furnish(k, 'coffee', -6.5, 0, -8.5, 0);
   k.prop('clock', DEPOT.clock, -Math.PI / 2);
   k.prop('poster', { x: -11.83, y: 1.7, z: -5.6 }, Math.PI / 2, { art: 'safety' });
+  k.prop('poster', { x: -6.13, y: 1.75, z: -7.4 }, -Math.PI / 2, { art: 'hands' });
   k.prop('lamp', { x: -9, y: 2.92, z: -6.5 }, 0, { color: 0xffe2b8, power: 2.6, range: 8 });
 
   // --- storeroom (dark: the flashlight lesson) ----------------------------------------------------
@@ -354,6 +355,7 @@ export function makeDepot(): LevelDef {
     terrain: TERRAIN,
     hour: 9.4,
     sunset: 235,
+    attract: { target: { x: 0, y: 3, z: 6 }, radius: 36, height: 8, hour: 19.3, speed: 0.035 },
     statics: k.statics,
     props: k.props,
     nature,
@@ -421,7 +423,7 @@ export function makeDepot(): LevelDef {
       { id: 'crew', hinge: { x: -9.7, y: 0, z: -4 }, width: 1.2, height: 2.2, yaw: 0, label: 'door', open: true },
       { id: 'stores', hinge: { x: 8.5, y: 0, z: -4 }, width: 1.4, height: 2.2, yaw: 0, label: 'storeroom door' },
     ],
-    spawn: { pos: { x: -10.6, y: 0, z: -5.6 }, yaw: -Math.PI / 2 },
+    spawn: { pos: { x: -11.1, y: 0, z: -4.9 }, yaw: -0.95 },
     beats,
     side: [
       { id: 'crate', text: 'Reach the sealed crate on the containers', done: (w) => w.lore.has('crate'), visible: (w) => w.flag('seenCrate') || w.lore.has('crate') },

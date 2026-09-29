@@ -50,7 +50,7 @@ export class TerrainView {
     private bake: GroundBake,
     quality: 'low' | 'med' | 'high',
   ) {
-    this.mat = styl({ vertexColors: true, rough: 0.96, noise: 0.14, noiseScale: 5, rim: 0.08, env: 0.25 });
+    this.mat = styl({ vertexColors: true, rough: 0.96, noise: 0.14, noiseScale: 5, rim: 0.08, env: 0.25, spec: 0.25 });
     const n = t.n - 1; // cells per side
     const chunk = 96;
     const chunks = Math.ceil(n / chunk);

@@ -44,7 +44,13 @@ float terrainH(vec2 p) {
   return h11 + (h01 - h11) * (1.0 - f.x) + (h10 - h11) * (1.0 - f.y);
 }
 vec2 groundUv(vec2 p) { return ((p + uHalf) / uCell + 0.5) / uN; }
-float gh1(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// Integer-ish hash (no big sin() arguments): stable and full-precision at
+// any world coordinate, so a 0-density cell never rolls a blade.
+float gh1(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
 vec2 gh2(vec2 p) { return vec2(gh1(p), gh1(p + 17.31)); }
 `;
 
@@ -108,6 +114,8 @@ function lattice(radius: number, spacing: number): Float32Array {
   return out;
 }
 
+export const GRASS_PUSHERS = 8;
+
 export class Grass {
   readonly group = new THREE.Group();
   private uniforms: Record<string, THREE.IUniform>;
@@ -128,7 +136,7 @@ export class Grass {
       uWind: SU.uWind,
       uWindStrength: SU.uWindStrength,
       // things that flatten the grass (the player, vehicles)
-      uPush: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
+      uPush: { value: Array.from({ length: GRASS_PUSHERS }, () => new THREE.Vector4()) },
     };
 
     this.group.add(this.makeLayer(bladeGeometry(), lattice(o.radius, o.spacing), false, o.radius, o.spacing));
@@ -169,7 +177,7 @@ uniform float uGrassH;
 uniform float uTime;
 uniform vec2 uWind;
 uniform float uWindStrength;
-uniform vec4 uPush[4];
+uniform vec4 uPush[${GRASS_PUSHERS}];
 attribute vec2 aOff;
 ${flower ? 'attribute float aHead;' : ''}
 varying vec3 vGrassCol;
@@ -193,7 +201,8 @@ float dist = distance(wp, uCam.xz);
 vec4 gs = texture2D(uGroundTex, groundUv(wp));
 ${flower ? 'float dens = texture2D(uFlowerTex, groundUv(wp)).r;' : 'float dens = gs.a;'}
 float fade = 1.0 - smoothstep(R * 0.55, R * 0.98, dist);
-float keep = step(rnd, dens * fade) ;
+// below a floor, grass is absent rather than a scatter of lone dark spikes
+float keep = dens > 0.14 && rnd < dens * fade ? 1.0 : 0.0;
 float hgt = ${flower ? 'mix(0.26, 0.42, gh1(cell + 9.1))' : 'uGrassH * mix(0.45, 1.3, pow(gh1(cell + 5.7), 1.5)) * (0.5 + 0.5 * dens)'} * keep;
 float ang = gh1(cell + 2.3) * 6.2831;
 vec2 dir = vec2(cos(ang), sin(ang));
@@ -211,7 +220,7 @@ p.x += uWind.x * sway * bend * 0.55;
 p.z += uWind.y * sway * bend * 0.55;
 // natural lean + push-away from the player and wheels
 p.xz += dir.yx * vec2(1.0, -1.0) * bend * 0.12;
-for (int i = 0; i < 4; i++) {
+for (int i = 0; i < ${GRASS_PUSHERS}; i++) {
   vec2 d = p.xz - uPush[i].xy;
   float dl = length(d);
   float k = (1.0 - smoothstep(0.0, uPush[i].z, dl)) * uPush[i].w;
@@ -265,7 +274,7 @@ outgoingLight += vGrassCol * 0.35 * vTip * pow(max(dot(normalize(vStylWorld - ca
   update(cam: THREE.Vector3, pushers: { x: number; z: number; r: number; k: number }[]): void {
     (this.uniforms.uCam.value as THREE.Vector3).copy(cam);
     const push = this.uniforms.uPush.value as THREE.Vector4[];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < GRASS_PUSHERS; i++) {
       const p = pushers[i];
       if (p) push[i].set(p.x, p.z, p.r, p.k);
       else push[i].set(0, 0, 1, 0);

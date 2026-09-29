@@ -68,6 +68,8 @@ export interface StylOpts {
   nearFade?: number;
   /** Only fade above this object-space height (keeps tree trunks solid). */
   fadeMinY?: number;
+  /** Scale on specular (direct + environment). Matte ground and leaves want little. */
+  spec?: number;
 }
 
 const NOISE_GLSL = /* glsl */ `
@@ -177,6 +179,7 @@ function patch(m: THREE.Material, o: StylOpts): void {
     shader.uniforms.uWindAmp = { value: wind };
     shader.uniforms.uBackShade = { value: o.backShade ?? 1 };
     shader.uniforms.uFadeMinY = { value: o.fadeMinY ?? -1e4 };
+    shader.uniforms.uSpec = { value: o.spec ?? 1 };
     shader.uniforms.uNearFade = { value: o.nearFade ?? 0 };
 
     let vs = shader.vertexShader;
@@ -230,6 +233,7 @@ uniform float uWindAmp;`,
 varying vec3 vStylWorld;
 varying float vStylLocalY;
 uniform float uFadeMinY;
+uniform float uSpec;
 uniform vec3 uRimColor;
 uniform float uWrap;
 uniform float uNoiseAmt;
@@ -271,7 +275,15 @@ if (uNearFade > 0.0 && vStylLocalY > uFadeMinY) {
 	float wrapNL = saturate( ( rawNL + uWrap ) / ( 1.0 + uWrap ) );
 	wrapNL = wrapNL * wrapNL * ( 3.0 - 2.0 * wrapNL );
 	vec3 irradiance = wrapNL * directLight.color;`,
-      ),
+        )
+        // Specular takes the true N.L (wrap is a diffuse trick: wrapped
+        // specular paints a grazing white sheen on faces turned away).
+        .replace(
+          'reflectedLight.directSpecular += irradiance * BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, material );',
+          'reflectedLight.directSpecular += dotNL * directLight.color * BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, material ) * uSpec;',
+        )
+        .replace('reflectedLight.indirectSpecular += radiance * singleScattering;', 'reflectedLight.indirectSpecular += radiance * singleScattering * uSpec;')
+        .replace('reflectedLight.indirectSpecular += multiScattering * cosineWeightedIrradiance;', 'reflectedLight.indirectSpecular += multiScattering * cosineWeightedIrradiance * uSpec;'),
     );
     fs = fs.replace(
       '#include <opaque_fragment>',

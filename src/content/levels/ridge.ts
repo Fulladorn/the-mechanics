@@ -204,6 +204,11 @@ export function makeRidge(): LevelDef {
   k.box({ x: Mi.x - 7, y: my + 3.1, z: Mi.z }, { x: 7, y: 0.2, z: 2 }, 0, 'rock');
   k.box({ x: Mi.x - 14.2, y: my + 1.4, z: Mi.z }, { x: 0.2, y: 1.6, z: 2 }, 0, 'rock');
   k.prop('mineTunnel', { x: Mi.x, y: my, z: Mi.z }, 0, { len: 14 });
+  // the hill the drift runs into (drawn by mineTunnel): keep people out of it
+  for (const sd of [-1, 1]) {
+    k.box({ x: Mi.x - 8.3, y: my + 2, z: Mi.z + sd * 3.95 }, { x: 7.4, y: 3, z: 1.55 }, 0, 'rock');
+    k.box({ x: Mi.x - 8.3, y: my + 2, z: Mi.z + sd * 7.75 }, { x: 5.3, y: 3, z: 2.25 }, 0, 'rock');
+  }
   k.prop('mineCart', { x: Mi.x - 5, y: my, z: Mi.z + 0.6 }, 0);
   k.block(Mi.x - 5, my, Mi.z + 0.6, 1.4, 1.1, 0.9, 0, 'metal');
   k.prop('lantern', { x: Mi.x - 12, y: my + 1.2, z: Mi.z - 1.5 }, 0);
@@ -631,6 +636,11 @@ export function makeRidge(): LevelDef {
     statics: k.statics,
     props: k.props,
     nature,
+    ground: [
+      // the drift floor (no grass under the rock) and the spoil apron out front
+      { x0: Mi.x - 15, z0: Mi.z - 2.3, x1: Mi.x + 0.4, z1: Mi.z + 2.3, color: 0x4e4338, grass: 0 },
+      { x0: Mi.x - 2, z0: Mi.z - 6, x1: Mi.x + 10, z1: Mi.z + 6, color: 0x8b7a62, grass: 0.1, feather: 3.5 },
+    ],
     items,
     machines: [
       {

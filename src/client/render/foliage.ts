@@ -306,6 +306,7 @@ export class Nature {
           backShade: canopy ? 0.72 : 0.45,
           nearFade: canopy ? 1.1 : stone ? 0.6 : 0,
           fadeMinY: FADE_MIN_Y[k],
+          spec: 0.5,
         });
         mats.set(k, m);
       }

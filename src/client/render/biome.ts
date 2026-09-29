@@ -31,8 +31,8 @@ export const PALETTES: Record<string, BiomePalette> = {
     grassDark: 0x3f7d3c,
     dry: 0xc2b25e,
     dirt: 0x9a7650,
-    gravel: 0xb2a283,
-    rut: 0x7f6c52,
+    gravel: 0xa49476,
+    rut: 0x6f5c45,
     asphalt: 0x4d4f55,
     rock: 0x958c80,
     rockDark: 0x6b6770,
@@ -131,13 +131,24 @@ export class Biome {
       const base = surf === 'asphalt' ? p.asphalt : surf === 'gravel' ? p.gravel : p.dirt;
       if (road.dist < hw + 0.2) {
         col.setHex(base);
-        if (surf !== 'asphalt') {
-          const rut = Math.abs(road.dist - hw * 0.42);
-          col.lerp(C.a.setHex(p.rut), (1 - THREE.MathUtils.smoothstep(rut, 0.25, 0.7)) * 0.55);
-          col.multiplyScalar(0.94 + n2 * 0.12);
-        } else col.multiplyScalar(0.96 + n2 * 0.06);
         grass = 0;
         flowers = 0;
+        if (surf !== 'asphalt') {
+          // Mottled stone, darker packed wheel ruts, loose lighter edges and —
+          // on the backcountry tracks — a grassy crown between the ruts.
+          const n3 = fbm(x / 2.3, z / 2.3, this.seed + 29, 2) * 0.5 + 0.5;
+          col.lerp(C.a.setHex(p.dirt), THREE.MathUtils.smoothstep(n1 * n3, 0.25, 0.55) * 0.45);
+          const rut = Math.abs(road.dist - hw * 0.42);
+          col.lerp(C.a.setHex(p.rut), (1 - THREE.MathUtils.smoothstep(rut, 0.2, 0.75)) * 0.7);
+          col.multiplyScalar(0.9 + n3 * 0.2);
+          const edge = THREE.MathUtils.smoothstep(road.dist, hw * 0.75, hw + 0.2);
+          col.lerp(C.a.setHex(p.dry), edge * 0.25);
+          if (hw < 4.5) {
+            const crown = 1 - THREE.MathUtils.smoothstep(road.dist, hw * 0.1, hw * 0.24);
+            col.lerp(C.a.setHex(p.grassDark), crown * (0.35 + n3 * 0.25));
+            grass = crown * (0.25 + n3 * 0.35);
+          }
+        } else col.multiplyScalar(0.96 + n2 * 0.06);
       } else {
         const k = 1 - THREE.MathUtils.smoothstep(road.dist, hw + 0.2, hw + 2.2 + n2 * 1.5);
         col.lerp(C.a.setHex(p.dirt), k * 0.85);

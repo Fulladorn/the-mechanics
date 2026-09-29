@@ -353,6 +353,18 @@ function installDebug(): void {
       game.setCinematic(x === undefined ? null : { pos: from, quat: new THREE.Quaternion().setFromRotationMatrix(m) });
     },
     nocam: () => game?.setCinematic(null),
+    /** What's on screen at NDC (sx, sy): the meshes a ray hits, nearest first. */
+    pick: (sx: number, sy: number) => {
+      if (!game) return [];
+      const rc = new THREE.Raycaster();
+      rc.setFromCamera(new THREE.Vector2(sx, sy), game.view.camera);
+      return rc.intersectObjects(game.view.scene.children, true).slice(0, 4).map((h) => {
+        const chain: string[] = [];
+        for (let o: THREE.Object3D | null = h.object; o && chain.length < 5; o = o.parent) chain.push(o.name || o.type);
+        const m = (h.object as THREE.Mesh).material as THREE.MeshStandardMaterial;
+        return { d: +h.distance.toFixed(2), p: [+h.point.x.toFixed(1), +h.point.y.toFixed(1), +h.point.z.toFixed(1)], chain: chain.join('<'), color: m?.color?.getHexString?.(), vc: !!m?.vertexColors, tris: (h.object as THREE.Mesh).geometry?.index?.count };
+      });
+    },
   };
   (window as unknown as { __mech: typeof bridge }).__mech = bridge;
 }

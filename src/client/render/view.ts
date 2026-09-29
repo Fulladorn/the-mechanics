@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { G } from '../../sim/physics';
 import type { World } from '../../sim/world';
 import type { LevelDef } from '../../content/levels/types';
 import type { Settings } from '../settings';
@@ -201,6 +202,10 @@ export class GameView {
     this.particles = new Particles(this.scene, q, (x, z) => world.terrain.heightAt(x, z));
     this.highlight = new Highlight(this.scene);
     this.rig = new CameraRig(this.camera, world.terrain);
+    this.rig.obstruct = (from, dir, len) => {
+      const hit = world.phys.castRay({ x: from.x, y: from.y, z: from.z }, { x: dir.x, y: dir.y, z: dir.z }, len, G.STATIC | G.DOOR);
+      return hit ? hit.toi : null;
+    };
     this.vm = new Viewmodel(innerWidth / innerHeight, settings.video.fov);
     this.scene.add(this.vm.flashlight, this.vm.flashlight.target);
     this.post = new Post(this.renderer, this.scene, this.camera, q, settings.video.postfx);

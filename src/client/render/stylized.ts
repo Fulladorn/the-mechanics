@@ -62,6 +62,12 @@ export interface StylOpts {
   clearcoat?: number;
   depthWrite?: boolean;
   polygonOffset?: number;
+  /** Double-sided surfaces: multiply the colour of back faces (the inside of a canopy is shade). */
+  backShade?: number;
+  /** Dither this surface out when the camera is closer than this (metres), so you never see into it. */
+  nearFade?: number;
+  /** Only fade above this object-space height (keeps tree trunks solid). */
+  fadeMinY?: number;
 }
 
 const NOISE_GLSL = /* glsl */ `
@@ -169,12 +175,16 @@ function patch(m: THREE.Material, o: StylOpts): void {
     shader.uniforms.uNoiseScale = { value: 1 / noiseScale };
     shader.uniforms.uRim = { value: rim };
     shader.uniforms.uWindAmp = { value: wind };
+    shader.uniforms.uBackShade = { value: o.backShade ?? 1 };
+    shader.uniforms.uFadeMinY = { value: o.fadeMinY ?? -1e4 };
+    shader.uniforms.uNearFade = { value: o.nearFade ?? 0 };
 
     let vs = shader.vertexShader;
     vs = vs.replace(
       '#include <common>',
       `#include <common>
 varying vec3 vStylWorld;
+varying float vStylLocalY;
 uniform float uTime;
 uniform vec2 uWind;
 uniform float uWindStrength;
@@ -208,6 +218,7 @@ uniform float uWindAmp;`,
     swp = instanceMatrix * swp;
   #endif
   vStylWorld = (modelMatrix * swp).xyz;
+  vStylLocalY = position.y;
 }`,
     );
     shader.vertexShader = vs;
@@ -217,17 +228,32 @@ uniform float uWindAmp;`,
       '#include <common>',
       `#include <common>
 varying vec3 vStylWorld;
+varying float vStylLocalY;
+uniform float uFadeMinY;
 uniform vec3 uRimColor;
 uniform float uWrap;
 uniform float uNoiseAmt;
 uniform float uNoiseScale;
 uniform float uRim;
+uniform float uBackShade;
+uniform float uNearFade;
 ${NOISE_GLSL}
+float stylBayer(vec2 p) {
+  // 4x4 ordered dither threshold in (0,1)
+  ivec2 q = ivec2(mod(p, 4.0));
+  int i = q.x + q.y * 4;
+  int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  return (float(m[i]) + 0.5) / 16.0;
+}
 ${FOG_PARS}`,
     );
     fs = fs.replace(
       '#include <color_fragment>',
       `#include <color_fragment>
+if (uNearFade > 0.0 && vStylLocalY > uFadeMinY) {
+  float camD = distance(vStylWorld, cameraPosition);
+  if (smoothstep(uNearFade * 0.55, uNearFade, camD) < stylBayer(gl_FragCoord.xy)) discard;
+}
 {
   vec2 np = vStylWorld.xz * uNoiseScale + vStylWorld.y * 0.13;
   float n = stylNoise(np) * 0.65 + stylNoise(np * 2.7 + 11.3) * 0.35;
@@ -252,6 +278,16 @@ ${FOG_PARS}`,
       `{
   float rimF = 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) );
   rimF = rimF * rimF * rimF;
+#ifdef DOUBLE_SIDED
+  if (!gl_FrontFacing) {
+    // Undersides and interiors: no sheen, no sky reflection. Keep the light's
+    // brightness but take the surface's own hue, then sink it into shade.
+    float lum = dot( outgoingLight, vec3( 0.3, 0.59, 0.11 ) );
+    float base = max( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ), 0.04 );
+    outgoingLight = min( diffuseColor.rgb * ( lum / base ), diffuseColor.rgb * 1.1 ) * uBackShade;
+    rimF = 0.0;
+  }
+#endif
   outgoingLight += uRimColor * rimF * uRim * ( 0.35 + 0.65 * diffuseColor.rgb );
 }
 #include <opaque_fragment>`,

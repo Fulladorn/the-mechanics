@@ -100,10 +100,11 @@ function trunk(h: number, r: number, color = TRUNK): THREE.BufferGeometry {
 
 function pine(seed: number, fir = false): THREE.BufferGeometry {
   const rng = makeRng(seed);
-  const parts: THREE.BufferGeometry[] = [trunk(4.2, 0.26)];
+  const parts: THREE.BufferGeometry[] = [trunk(5.0, 0.26)];
   const tiers = fir ? 6 : 5;
   const H = fir ? 7.5 : 6.6;
-  const base = 1.3;
+  // lowest boughs clear head height, so you can walk under a pine
+  const base = fir ? 2.1 : 2.2;
   const center = new THREE.Vector3(0, base + H * 0.4, 0);
   const deep = col(fir ? 0x1f4a3a : 0x2a5a3a);
   const mid = col(fir ? 0x2f6a48 : 0x3f7d45);
@@ -267,6 +268,9 @@ const BUILDERS: Record<NatureKind, (seed: number) => THREE.BufferGeometry> = {
   deadTree: (s) => deadTree(s),
 };
 
+// Object-space height where the canopy starts: trunks below it never dither.
+const FADE_MIN_Y: Partial<Record<NatureKind, number>> = { pine: 1.9, fir: 1.8, broadleaf: 2.4, birch: 3.1 };
+
 const WIND: Partial<Record<NatureKind, number>> = { pine: 0.018, fir: 0.015, broadleaf: 0.03, birch: 0.04, bush: 0.05, deadTree: 0.01 };
 
 export class Nature {
@@ -287,7 +291,22 @@ export class Nature {
     const matFor = (k: NatureKind) => {
       let m = mats.get(k);
       if (!m) {
-        m = styl({ vertexColors: true, rough: 0.9, noise: 0.1, noiseScale: 2, rim: k === 'rock' || k === 'boulder' ? 0.15 : 0.45, wind: WIND[k] ?? 0 });
+        const stone = k === 'rock' || k === 'boulder';
+        const canopy = k === 'pine' || k === 'fir' || k === 'broadleaf' || k === 'birch' || k === 'bush';
+        // Canopies are double-sided (seen from under or inside, they're solid
+        // shade, not holes) and dither away as the camera pushes into them.
+        m = styl({
+          vertexColors: true,
+          rough: 0.9,
+          noise: 0.1,
+          noiseScale: 2,
+          rim: stone ? 0.15 : 0.45,
+          wind: WIND[k] ?? 0,
+          side: canopy || stone ? THREE.DoubleSide : THREE.FrontSide,
+          backShade: canopy ? 0.72 : 0.45,
+          nearFade: canopy ? 1.1 : stone ? 0.6 : 0,
+          fadeMinY: FADE_MIN_Y[k],
+        });
         mats.set(k, m);
       }
       return m;

@@ -50,7 +50,8 @@ export class Highlight {
   private t = 0;
   // Hint layer: a soft, slow amber breath on what the current step wants.
   private hintGroup = new THREE.Group();
-  private hintMat = rimMaterial(new THREE.Color(0xffc15a), 0.1, 1.8, 0.7);
+  // Strong enough to read on chrome under shop lights: a warm fill plus rim.
+  private hintMat = rimMaterial(new THREE.Color(0xffb13a), 0.55, 1.4, 1.0);
   private hintPairs: { src: THREE.Mesh; copy: THREE.Mesh }[] = [];
   private hintKey = '';
 

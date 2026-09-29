@@ -15,7 +15,7 @@ problems below were found by it.
 
 | # | Class | Rule | Shared fix | Check | Status |
 |---|---|---|---|---|---|
-| 1 | Drawn ≠ clickable | A target is exactly where its part is drawn | `Machine.hubPose`, `slotPoint`, `boltPos`; the renderer reads the same pose; nuts hang off the hub, not the rolling tyre | `test/lugnuts.spec.ts`; browser real-mouse check | Fixed (wheels). Other animated parts: audit in P3-3 |
+| 1 | Drawn ≠ clickable | A target is exactly where its part is drawn, and everything you can use has a drawn part to highlight | `Machine.hubPose`, `slotPoint`, `boltPos`; the renderer reads the same pose; nuts hang off the hub; yawed slots place their bolts in slot space; every station and cover maps to a drawn object | `test/lugnuts.spec.ts`; `node tools/targetcheck.mjs` (every target in both levels, as found and opened up) | Fixed |
 | 2 | Invisible / stale targets | Nothing invisible is clickable | A nut that's off a part being removed has no target | `test/lugnuts.spec.ts` | Fixed |
 | 3 | Focus theft | A disabled prompt never beats a usable one under the crosshair | `DISABLED_PENALTY` in `pickFocus`; sticky focus while holding | `test/lugnuts.spec.ts` (wobble), guidance bot | Fixed |
 | 4 | Steps without exact targets | Every step names its target(s), its side, and its progress | `Step.targets` from `Machine.nextStep` / `removeStep`; `BeatDef.targets`; the next-step glow | Guidance bot | Fixed for all machine steps, both levels' beats |
@@ -40,6 +40,15 @@ problems below were found by it.
   with haul guidance, "worth keeping" stowing and a spare can at the RV.
 - The rack was last-in-first-out, so the part you needed could be buried under
   others.
+
+## Found and fixed by the target audit (`tools/targetcheck.mjs`)
+- The radiator-hose clamps were drawn 22 cm from where they're clicked (the
+  hose slot is rotated; its bolt offsets weren't).
+- The logging truck's battery box had no lid to see, highlight or open.
+- The generator's pull cord, the RV's storage bin and fuel filler: usable, but
+  not linked to anything drawn, so they couldn't glow.
+- The mine's foreman's logbook was an invisible interaction. There's now a book
+  on a crate by the lantern.
 
 ## How to add to this
 When a playtest turns up a problem, first ask which class it belongs to. If

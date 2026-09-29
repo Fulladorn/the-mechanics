@@ -153,6 +153,18 @@ export class Hud {
     }
   }
 
+  /** A live line under the puzzle help: how close you are. */
+  panelProgress(text: string): void {
+    let el = this.panelHelp.querySelector('.progress') as HTMLElement | null;
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'progress';
+      el.style.cssText = 'margin-top:8px;font:700 15px var(--display);color:var(--orange);letter-spacing:0.5px';
+      this.panelHelp.appendChild(el);
+    }
+    this.set('panelProg', text, () => (el!.textContent = text));
+  }
+
   // --- per frame ----------------------------------------------------------------------
 
   update(w: World, c: HudCtx, dt: number, jobSheet: () => string): void {

@@ -116,6 +116,8 @@ export class World {
   private triggersFired = new Set<string>();
   ended: 'won' | 'failed' | null = null;
   failReason: FailReason | null = null;
+  /** What last hurt you ('wolf', 'fall', 'crash', 'cold'...), so a fail screen can say what to do differently. */
+  lastHurtBy: string | null = null;
   damageTaken = 0;
 
   /** What the crosshair is on (recomputed every step). */
@@ -446,6 +448,7 @@ export class World {
     const r = applyDamage(this.vitals, amount);
     if (r.damage <= 0) return;
     this.damageTaken += r.damage;
+    this.lastHurtBy = cause;
     this.events.push({ t: 'damage', amount: r.damage, cause });
     if (r.wentDown) this.fail('downed');
   }
@@ -486,6 +489,11 @@ export class World {
   }
 
   private lastCands: Interactable[] = [];
+
+  /** Everything the crosshair could act on from where you stand (tools and audits). */
+  nearbyInteractables(): readonly Interactable[] {
+    return this.lastCands;
+  }
 
   /** Where a (good) item of this kind is, from the player's point of view. */
   whereIs(kind: ItemKind, good = true, emptyOk = false): { at: 'hands' | 'belt' | 'rack' | 'world' | 'none'; vehicle?: string; item?: WorldItem } {

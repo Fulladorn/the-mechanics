@@ -39,6 +39,13 @@ const FAIL_TEXT: Record<FailReason, { head: string; body: string; tip: string }>
   },
 };
 
+/** "You went down" — the tip should be about what actually did it. */
+const DOWNED_BY: Record<string, { body?: string; tip: string }> = {
+  wolf: { tip: 'Wolves hate fire. Put a flare on your belt, select it and click to light it — they won’t come near. Right mouse blocks a bite.' },
+  fall: { body: 'That drop was further than it looked.', tip: 'Walk down slopes instead of jumping off them; long falls hurt. Crouch (C) near edges.' },
+  crash: { body: 'The vehicle stopped. You didn’t.', tip: 'Ease off on the rough stuff and brake before the hairpins.' },
+};
+
 const GRADE_WORD: Record<string, string> = {
   S: 'Legendary work',
   A: 'Excellent work',
@@ -217,8 +224,8 @@ export class Shell {
 
   // --- failed --------------------------------------------------------------------------
 
-  failed(reason: FailReason, checkpoint: boolean): void {
-    const f = FAIL_TEXT[reason];
+  failed(reason: FailReason, checkpoint: boolean, cause?: string | null): void {
+    const f = { ...FAIL_TEXT[reason], ...(reason === 'downed' && cause ? DOWNED_BY[cause] : undefined) };
     const wrap = el('div', 'failed');
     wrap.appendChild(
       el(

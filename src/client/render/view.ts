@@ -485,6 +485,38 @@ export class GameView {
   }
 
   /** Map a focus target id to the object to outline. */
+  /**
+   * Drawn-vs-clickable audit: every nearby target must resolve to something
+   * visible, and its click point must sit on (or within a whisker of) what's
+   * drawn. Returns the offenders.
+   */
+  auditTargets(): { id: string; label: string; problem: string; off?: number }[] {
+    const out: { id: string; label: string; problem: string; off?: number }[] = [];
+    const box = new THREE.Box3();
+    const p = new THREE.Vector3();
+    for (const c of this.world.nearbyInteractables()) {
+      if (!c.target || (c.priority ?? 0) < 0 || c.target.includes(':ghost:')) continue;
+      const o = this.resolveTarget(c.target);
+      if (!o) {
+        out.push({ id: c.id, label: c.label, problem: 'no drawn object' });
+        continue;
+      }
+      let vis = true;
+      for (let q: THREE.Object3D | null = o; q; q = q.parent) if (!q.visible) vis = false;
+      if (!vis) {
+        out.push({ id: c.id, label: c.label, problem: 'clickable but not drawn' });
+        continue;
+      }
+      o.updateWorldMatrix(true, true);
+      box.setFromObject(o);
+      if (box.isEmpty()) continue;
+      const off = box.distanceToPoint(p.set(c.pos.x, c.pos.y, c.pos.z));
+      // Spheres may hover just off a surface; allow a little under their radius.
+      if (off > Math.max(0.03, Math.min(c.r * 0.6, 0.15))) out.push({ id: c.id, label: c.label, problem: 'click point off the drawn part', off: +off.toFixed(3) });
+    }
+    return out;
+  }
+
   private resolveTarget(target: string | undefined): THREE.Object3D | null {
     if (!target) return null;
     if (target.startsWith('item:')) return this.items.get(Number(target.slice(5)))?.obj ?? null;
@@ -502,6 +534,11 @@ export class GameView {
     if (target.startsWith('door:')) return this.doors.get(target.slice(5)) ?? null;
     for (const p of this.props) {
       const o = p.targets?.get(target);
+      if (o) return o;
+    }
+    // Parts of machine art named after their target (e.g. a generator's cord).
+    for (const mv of this.machines.values()) {
+      const o = mv.root.getObjectByName(target);
       if (o) return o;
     }
     return null;

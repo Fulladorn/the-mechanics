@@ -4,6 +4,7 @@ import type { SimEvent } from '../sim/events';
 import type { LevelDef } from '../content/levels/types';
 import { DT } from '../shared/constants';
 import { ITEM_DEFS } from '../sim/items';
+import { gaugeOk } from '../sim/puzzles/valveBalance';
 import { GameView } from './render/view';
 import { Hud } from './ui/hud';
 import { icon } from './ui/icons';
@@ -162,6 +163,18 @@ export class Game {
 
   private updatePanelMode(): void {
     const w = this.world;
+    if (w.panel) {
+      const m = w.machine(w.panel.machine);
+      const f = m.fuse.get(w.panel.panel);
+      const v = m.valve.get(w.panel.panel);
+      if (f) {
+        const on = f.lit.filter(Boolean).length;
+        this.hud.panelProgress(on === f.lit.length ? 'All green — done' : `${on}/${f.lit.length} fuses green`);
+      } else if (v) {
+        const ok = v.coupling.filter((_, g) => gaugeOk(v, g)).length;
+        this.hud.panelProgress(ok === v.valves.length ? 'All in the green — pull the yellow lever' : `${ok}/${v.valves.length} gauges in the green`);
+      }
+    }
     const key = w.panel ? `${w.panel.machine}:${w.panel.panel}` : '';
     if (key === this.panelKey) return;
     this.panelKey = key;

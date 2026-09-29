@@ -130,14 +130,16 @@ export class MachineView {
       // Nuts hang off the hub pivot (not the rolling, squashing tyre), so
       // they sit exactly where the sim puts their click targets.
       const holder = vis.wheel ? vis.wheel.pivot : group;
-      const lx = b.pos.x - def.pos.x;
-      const ly = b.pos.y - def.pos.y;
-      const lz = b.pos.z - def.pos.z;
-      n.position.set(lx, ly, lz);
+      // Bolt positions/normals are in the machine frame; the holder may be
+      // yawed (a hose lying across the engine), so bring them into its frame.
+      const unyaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), vis.wheel ? 0 : -(def.yaw ?? 0));
+      const off = new THREE.Vector3(b.pos.x - def.pos.x, b.pos.y - def.pos.y, b.pos.z - def.pos.z).applyQuaternion(unyaw);
+      n.position.copy(off);
       const nrm = b.normal ?? { x: 0, y: 1, z: 0 };
-      n.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(nrm.x, nrm.y, nrm.z));
+      const nv = new THREE.Vector3(nrm.x, nrm.y, nrm.z).applyQuaternion(unyaw);
+      n.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), nv);
       n.userData.base = n.position.clone();
-      n.userData.normal = new THREE.Vector3(nrm.x, nrm.y, nrm.z);
+      n.userData.normal = nv;
       holder.add(n);
       vis.nuts.push(n);
     });
@@ -241,6 +243,13 @@ export class MachineView {
       this.hoodT += ((open ? 1 : 0) - this.hoodT) * Math.min(1, dt * 7);
       const e = this.hoodT;
       this.model.hood.rotation.x = this.model.hoodOpen * (e * e * (3 - 2 * e));
+    }
+    // Other named lids (donor battery boxes) swing up about their hinge.
+    for (const [id, open] of Object.entries(s.covers)) {
+      if (id === 'hood' && this.model?.hood) continue;
+      const lid = this.root.getObjectByName(`cover:${id}`);
+      if (!lid) continue;
+      lid.rotation.x += ((open ? -1.9 : 0) - lid.rotation.x) * Math.min(1, dt * 7);
     }
 
     // Wheels spin with the vehicle; parked, they settle to a nut-aligned angle.
@@ -439,7 +448,7 @@ export class MachineView {
         return v?.obj ?? v?.wheel?.pivot ?? v?.group ?? null;
       }
       case 'cover':
-        return this.model?.hood ?? null;
+        return this.model?.hood ?? this.root.getObjectByName(`cover:${id}`) ?? null;
       case 'term': {
         const [tid, which] = id.split('.');
         const c = this.clamps.get(tid);

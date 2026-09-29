@@ -216,7 +216,9 @@ export function makeRidge(): LevelDef {
   }
   k.prop('mineCart', { x: Mi.x - 5, y: my, z: Mi.z + 0.6 }, 0);
   k.block(Mi.x - 5, my, Mi.z + 0.6, 1.4, 1.1, 0.9, 0, 'metal');
-  k.prop('lantern', { x: Mi.x - 12, y: my + 1.2, z: Mi.z - 1.5 }, 0);
+  k.prop('lantern', { x: Mi.x - 12.25, y: my + 1.0, z: Mi.z - 1.45 }, 0);
+  k.prop('logbook', { x: Mi.x - 12, y: my + 0.98, z: Mi.z - 1.3 }, 0, { station: 'mineLog' });
+  k.block(Mi.x - 12, my, Mi.z - 1.3, 0.5, 0.5, 0.4, 0, 'wood');
 
   // --- bridge, rockslide, ford -----------------------------------------------------------------
   const B = RIDGE.bridge;

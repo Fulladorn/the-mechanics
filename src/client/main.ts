@@ -205,7 +205,7 @@ function failed(g: Game): void {
   document.exitPointerLock?.();
   hud.show(false);
   lastCheckpoint = g.world.checkpoint;
-  shell.failed(g.world.failReason ?? 'downed', !!lastCheckpoint);
+  shell.failed(g.world.failReason ?? 'downed', !!lastCheckpoint, g.world.lastHurtBy);
 }
 
 function pause(): void {
@@ -324,6 +324,8 @@ function installDebug(): void {
       input.pitch = Math.atan2(y - e.y, Math.hypot(x - e.x, z - e.z));
     },
     focus: () => game?.world.focus?.label ?? null,
+    /** Drawn-vs-clickable audit of everything in reach (see View.auditTargets). */
+    auditTargets: () => game?.view.auditTargets() ?? [],
     /** Headless browsers never grant pointer lock; pretend it's held so real mouse buttons reach the game. */
     lock: () => {
       input.locked = true;

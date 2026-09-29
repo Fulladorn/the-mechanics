@@ -157,7 +157,15 @@ export function buildLoggingTruck(paintHex = 0xc4862e): THREE.Group {
     g.add(d);
   }
   // battery box behind the cab (right side) — the lid is the machine cover
-  g.add(mesh(rbox(0.5, 0.36, 0.6, 0.04), dark, 1.2, -0.44, -0.6));
+  g.add(mesh(rbox(0.5, 0.3, 0.6, 0.04), dark, 1.2, -0.47, -0.6));
+  // the lid: a hinged plate on the outboard edge (named, so the game can
+  // highlight it and swing it open)
+  const lidPivot = new THREE.Group();
+  lidPivot.position.set(1.45, -0.3, -0.6);
+  const lid = mesh(rbox(0.52, 0.04, 0.62, 0.02), MAT.darkMetal(0x4a4f58), -0.25, 0.02, 0);
+  lidPivot.add(lid);
+  lidPivot.name = 'cover:box';
+  g.add(lidPivot);
   // log bunk + a load of logs
   const logMat = MAT.wood(0x8a5f3a);
   const endMat = styl({ color: 0xd9b27a, rough: 0.9, noise: 0.2 });
@@ -231,6 +239,7 @@ export function buildGenerator(): THREE.Group {
   const panel = mesh(rbox(0.3, 0.16, 0.02, 0.02), styl({ color: 0x1f2126, rough: 0.6 }), 0, 0.34, -0.47);
   g.add(panel);
   const cord = mesh(rbox(0.08, 0.04, 0.03, 0.01), styl({ color: 0x1f2126, rough: 0.5 }), 0.26, 0.38, 0.36);
+  cord.name = 'station:pullCord';
   g.add(cord);
   g.traverse((o) => {
     if (o instanceof THREE.Mesh) {

@@ -1,7 +1,7 @@
 import type { Quat, Vec3 } from '../shared/math';
 import { clamp, frameToWorld, qIdentity, qRotate } from '../shared/math';
 import type { SimEvent } from './events';
-import type { Interactable } from './interact';
+import type { Interactable, TargetBox } from './interact';
 import { ITEM_DEFS, itemLabel, type ItemKind, type ItemManager, type WorldItem } from './items';
 import { makeFuseGrid, press, isSolved as fuseSolved, type FusePuzzle } from './puzzles/fuseGrid';
 import { isSolved as valveSolved, makeValveBalance, setValve, type ValvePuzzle } from './puzzles/valveBalance';
@@ -171,6 +171,7 @@ export const TORQUE_BAND_ASSIST: [number, number] = [0.5, 0.9];
 export const LOOSEN_TIME = 0.45;
 
 const boltKey = (slot: string, i: number) => `${slot}#${i}`;
+const JACK_FIRST = 'Jack it up first — jack under the jack point beside this wheel, then hold E to pump';
 
 export class Machine {
   readonly state: MachineState;
@@ -185,6 +186,13 @@ export class Machine {
   /** Transient feedback state that must survive interactable regeneration. */
   private inBand = new Set<string>();
   private spill = new Map<string, number>();
+  /**
+   * Where each wheel hub actually is, relative to its slot's rest position
+   * (suspension travel, steering, a jacked wheel drooping). The vehicle keeps
+   * it current; bolt targets and the renderer both read it, so a lug nut is
+   * always clickable exactly where it's drawn.
+   */
+  readonly hubPose = new Map<string, { dy: number; steer: number }>();
 
   constructor(
     readonly def: MachineDef,
@@ -273,6 +281,24 @@ export class Machine {
 
   world(local: Vec3): Vec3 {
     return frameToWorld(this.pos, this.rot, local);
+  }
+
+  /** A point on a slot's part (machine frame → world), following its hub. */
+  slotPoint(slotId: string, local: Vec3): Vec3 {
+    const c = this.comps.get(slotId);
+    const h = this.hubPose.get(slotId);
+    if (!c || !h) return this.world(local);
+    const dx = local.x - c.pos.x;
+    const dz = local.z - c.pos.z;
+    const cs = Math.cos(h.steer);
+    const sn = Math.sin(h.steer);
+    return this.world({ x: c.pos.x + dx * cs + dz * sn, y: local.y + h.dy, z: c.pos.z - dx * sn + dz * cs });
+  }
+
+  /** World position of a slot's i-th bolt (what the crosshair must hit). */
+  boltPos(slotId: string, i: number): Vec3 {
+    const c = this.comp<SlotDef>(slotId);
+    return this.slotPoint(slotId, c.bolts![i].pos);
   }
 
   // --- state queries ----------------------------------------------------------
@@ -399,7 +425,7 @@ export class Machine {
     for (const pid of sys.parts) {
       if (this.componentOk(pid, items)) continue;
       const c = this.comps.get(pid)!;
-      const at = this.world(c.pos);
+      const at = this.slotPoint(pid, c.pos);
       if (c.t === 'slot') {
         const need = this.needsReason(c.needs, ctx);
         if (need) {
@@ -421,19 +447,25 @@ export class Machine {
             if (t.pos) return { text: 'Unclip the red (+) terminal', pos: this.world(this.comp<TerminalsDef>(c.terminals).pos) };
           }
           const loose = bolts.filter((b) => b.s === 'out').length;
-          if (loose < total) return { text: `Loosen the ${noun}s (${loose}/${total})`, pos: at };
+          if (loose < total) {
+            const next = bolts.findIndex((b) => b.s !== 'out');
+            return { text: `Loosen the ${this.whose(c)}${noun}s — ${loose}/${total} off`, pos: this.boltPos(pid, next) };
+          }
           if (c.lift && !this.jackRaised(c.lift)) return this.jackHint(c.lift, ctx);
-          return { text: `Take off the ${itemLabel(it).toLowerCase()}`, pos: at };
+          return { text: `Take off the ${c.label ? c.label.toLowerCase() : itemLabel(it).toLowerCase()}`, pos: at };
         }
         if (!it) {
           if (c.lift && !this.jackRaised(c.lift)) return this.jackHint(c.lift, ctx);
           const held = ctx.held();
           const label = ITEM_DEFS[c.accepts].label.toLowerCase();
-          if (held && held.kind === c.accepts && held.cond === 'good') return { text: `Fit the ${label}`, pos: at };
+          if (held && held.kind === c.accepts && held.cond === 'good') return { text: `Fit the ${label} onto the ${c.label ? c.label.toLowerCase().replace(/ wheel$/, '') + ' hub' : 'hub'}`, pos: at };
           return { text: `Find a good ${label}`, need: c.accepts, where: c.where, pos: at };
         }
         const tight = bolts.filter((b) => b.s === 'tight').length;
-        if (tight < total) return { text: `Torque the ${noun}s (${tight}/${total})`, pos: at };
+        if (tight < total) {
+          const next = bolts.findIndex((b) => b.s !== 'tight');
+          return { text: `Torque the ${this.whose(c)}${noun}s — ${tight}/${total} tight`, pos: this.boltPos(pid, next) };
+        }
         if (c.terminals) {
           const t = s.terminals[c.terminals];
           if (!t.pos) return { text: 'Clip on the red (+) terminal', pos: this.world(this.comp<TerminalsDef>(c.terminals).pos) };
@@ -472,6 +504,24 @@ export class Machine {
       }
     }
     return null;
+  }
+
+  /**
+   * A wheel's click volume is the tyre itself (a disc the width of the tread),
+   * not a ball around the hub: a ball pokes out past the lug nuts and steals
+   * the crosshair from them.
+   */
+  private wheelBox(c: SlotDef): TargetBox | undefined {
+    if (c.accepts !== 'wheel') return undefined;
+    const r = c.r ?? 0.36;
+    // Scored like a disc (off-centre aims lose to the nuts and the jack
+    // point beside it) and allowed to sit inside the body's arch collider.
+    return { hx: 0.13, hy: r, hz: r, rot: this.rot, offCap: r, slack: r };
+  }
+
+  /** "rear-left wheel's " for wheels (so you know which one), else "". */
+  private whose(c: SlotDef): string {
+    return c.accepts === 'wheel' && c.label ? `${c.label.toLowerCase()}'s ` : '';
   }
 
   private jackHint(id: string, ctx: MachineCtx): { text: string; pos?: Vec3; need?: ItemKind } {
@@ -600,23 +650,31 @@ export class Machine {
   private slotInteractables(c: SlotDef, ctx: MachineCtx, held: WorldItem | undefined, out: Interactable[]): void {
     const s = this.state;
     const items = ctx.items;
-    const at = this.world(c.pos);
+    const at = this.slotPoint(c.id, c.pos);
     const it = this.slotItem(items, c.id);
     const tgt = (kind: string, id: string) => `machine:${this.key}:${kind}:${id}`;
     const access = this.needsReason(c.needs, ctx);
     const noun = c.boltNoun ?? 'bolt';
 
     if (it) {
-      // Bolts: loosen tight ones, torque the rest.
-      (c.bolts ?? []).forEach((b, i) => {
+      // Bolts: loosen tight ones, torque the rest. A part that's coming off
+      // (bad) never offers to torque a nut you just took off it — that nut
+      // is gone from the stud, so there's nothing there to click.
+      const removing = it.cond === 'bad';
+      const all = this.boltsOf(c);
+      const total = all.length;
+      const offCount = all.filter((b) => b.s === 'out').length;
+      const tightCount = all.filter((b) => b.s === 'tight').length;
+      (c.bolts ?? []).forEach((_b, i) => {
         const key = boltKey(c.id, i);
         const st = s.bolts[key];
-        const p = this.world(b.pos);
+        if (removing && st.s === 'out') return;
+        const p = this.boltPos(c.id, i);
         const wrench = ctx.hasTool('wrench');
         const base: Interactable = {
           id: tgt('bolt', key),
           pos: p,
-          r: 0.065,
+          r: 0.07,
           label: '',
           verb: 'loosen',
           priority: 3,
@@ -626,7 +684,7 @@ export class Machine {
         if (st.s === 'tight') {
           out.push({
             ...base,
-            label: `Loosen ${noun}`,
+            label: `Loosen ${noun} · ${offCount}/${total} off`,
             verb: 'loosen',
             time: LOOSEN_TIME,
             run: () => {
@@ -639,7 +697,7 @@ export class Machine {
           const band = ctx.assist ? TORQUE_BAND_ASSIST : TORQUE_BAND;
           out.push({
             ...base,
-            label: `Torque ${noun}`,
+            label: `Torque ${noun} · ${tightCount}/${total} tight`,
             verb: 'torque',
             gauge: () => ({ value: st.torque, lo: band[0], hi: band[1] }),
             tick: (dt) => {
@@ -675,16 +733,17 @@ export class Machine {
         const bolts = this.boltsOf(c);
         const loose = bolts.filter((b) => b.s === 'out').length;
         let why: string | null = access;
-        if (!why && loose < bolts.length) why = `Loosen the ${noun}s first (${loose}/${bolts.length})`;
+        if (!why && loose < bolts.length) why = `Loosen the ${noun}s first — aim at one, hold left mouse (${loose}/${bolts.length} off)`;
         if (!why && c.terminals) {
           const t = s.terminals[c.terminals];
           if (t.pos || t.neg) why = 'Unclip the terminals first';
         }
-        if (!why && c.lift && !this.jackRaised(c.lift)) why = 'Jack it up first';
+        if (!why && c.lift && !this.jackRaised(c.lift)) why = JACK_FIRST;
         out.push({
           id: tgt('slot', c.id),
           pos: at,
           r: c.r ?? 0.3,
+          box: this.wheelBox(c),
           label: `Take off the ${itemLabel(it).toLowerCase()}`,
           verb: 'tap',
           priority: 1,
@@ -704,7 +763,7 @@ export class Machine {
     // Empty slot.
     if (held && held.kind === c.accepts) {
       let why: string | null = access;
-      if (!why && c.lift && !this.jackRaised(c.lift)) why = 'Jack it up first';
+      if (!why && c.lift && !this.jackRaised(c.lift)) why = JACK_FIRST;
       out.push({
         id: tgt('slot', c.id),
         pos: at,

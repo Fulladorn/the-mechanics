@@ -58,6 +58,9 @@ export interface VehicleIntent {
   handbrake: boolean;
 }
 
+/** How far a wheel hangs below its hub when its corner is jacked up. */
+export const HUB_DROOP = 0.05;
+
 export class Vehicle {
   readonly body: RBody;
   private ctrl: RAPIER.DynamicRayCastVehicleController;
@@ -288,9 +291,29 @@ export class Vehicle {
       if (this.pinned) return;
       wv.spin += (this.speed / w.radius) * dt;
     });
+    this.syncHubs();
 
     const up = this.up();
     this.flipped = up.y < 0.3 ? this.flipped + dt : 0;
+  }
+
+  /** Tell the machine where each wheel hub really is (see Machine.hubPose). */
+  private syncHubs(): void {
+    const m = this.machine;
+    if (!m) return;
+    this.def.wheels.forEach((w, i) => {
+      if (!w.slot) return;
+      const slot = m.def.components.find((c) => c.id === w.slot);
+      if (!slot) return;
+      if (this.pinned) {
+        // Parked for work: the hub rests at its slot; a jacked wheel droops.
+        const lift = slot.t === 'slot' ? slot.lift : undefined;
+        m.hubPose.set(w.slot, { dy: lift && m.jackRaised(lift) ? -HUB_DROOP : 0, steer: 0 });
+      } else {
+        const wv = this.wheels[i];
+        m.hubPose.set(w.slot, { dy: w.pos.y + wv.hub - slot.pos.y, steer: wv.steer });
+      }
+    });
   }
 
   private syncMachine(): void {

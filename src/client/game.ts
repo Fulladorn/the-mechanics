@@ -242,10 +242,20 @@ export class Game {
       case 'drop':
         a?.play(e.thrown ? 'throw' : 'drop');
         break;
-      case 'boltLoose':
+      case 'boltLoose': {
         a?.play('ratchetOut', e.pos);
         v.sparks(e.pos);
+        const [slotId] = e.bolt.split('#');
+        const m = this.world.machine(e.machine);
+        const slot = m.def.components.find((c) => c.id === slotId);
+        if (slot?.t === 'slot') {
+          const all = m.boltsOf(slot);
+          const off = all.filter((b) => b.s === 'out').length;
+          const noun = slot.boltNoun ?? 'bolt';
+          h.toast(off === all.length ? `All ${noun}s off` : `${noun[0].toUpperCase()}${noun.slice(1)} off · ${off}/${all.length}`);
+        }
         break;
+      }
       case 'boltTight':
         a?.play('boltClick', e.pos);
         v.sparks(e.pos);

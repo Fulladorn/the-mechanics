@@ -26,7 +26,7 @@ describe('repair machine', () => {
     const tyre = m.world({ x: slot.pos.x - 0.08, y: slot.pos.y + 0.27, z: slot.pos.z + 0.1 });
     // Loosen all five nuts first (you can, with the wheel on the ground).
     bot.approach(hub, 1.2, { x: hub.x - 3, y: 0, z: hub.z });
-    for (const b of slot.bolts!) bot.loosenAt(m.world(b.pos));
+    slot.bolts!.forEach((_, i) => bot.loosenAt(m.boltPos(slot.id, i)));
     expect(m.boltsOf(slot).every((b) => b.s === 'out')).toBe(true);
 
     // Can't pull it until it's jacked.
@@ -57,7 +57,7 @@ describe('repair machine', () => {
     bot.tapAt(good.pos, /Pick up Wheel/);
     bot.approach(hub, 1.2, { x: hub.x - 3, y: 0, z: hub.z });
     bot.tapAt(tyre, /Fit the wheel/);
-    for (const b of slot.bolts!) bot.torqueAt(m.world(b.pos));
+    slot.bolts!.forEach((_, i) => bot.torqueAt(m.boltPos(slot.id, i)));
     expect(m.componentOk('wheelRL', w.items)).toBe(true);
 
     bot.approach(jackPoint, 1.1, { x: jp.x - 3, y: 0, z: jp.z });
@@ -92,7 +92,7 @@ describe('repair machine', () => {
     const slot = m.comp<SlotDef>('wheelFL');
     const hub = m.world(slot.pos);
     bot.approach(hub, 1.2, { x: hub.x - 3, y: 0, z: hub.z });
-    const b = m.world(slot.bolts![0].pos);
+    const b = m.boltPos(slot.id, 0);
     bot.loosenAt(b);
     bot.aim(b);
     bot.seconds(1.2, { use: true });

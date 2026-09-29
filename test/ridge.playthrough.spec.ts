@@ -123,7 +123,7 @@ describe('level 1: the ridge job', () => {
     const puSlot = pu.comp<SlotDef>('wheelFL');
     const puHub = pu.world(puSlot.pos);
     bot.approach(puHub, 1.2, pu.world({ x: puSlot.pos.x - 2, y: 0, z: puSlot.pos.z }));
-    for (const b of puSlot.bolts!) bot.loosenAt(pu.world(b.pos));
+    puSlot.bolts!.forEach((_, i) => bot.loosenAt(pu.boltPos(puSlot.id, i)));
     const took = bot.tapAt(pu.world({ x: puSlot.pos.x - 0.08, y: puSlot.pos.y + 0.27, z: puSlot.pos.z + 0.1 }), /Take off the wheel/);
     expect(took).not.toMatch(/\[/);
     bot.tick(2);
@@ -158,7 +158,7 @@ describe('level 1: the ridge job', () => {
     bot.holdAt(jp, 1.5, /Pump the jack/);
     const side = m.world({ x: slot.pos.x - 2, y: 0, z: slot.pos.z });
     bot.approach(hub, 1.25, side);
-    for (const b of slot.bolts!) bot.loosenAt(m.world(b.pos));
+    slot.bolts!.forEach((_, i) => bot.loosenAt(m.boltPos(slot.id, i)));
     bot.tapAt(tyre, /Take off the shredded wheel/);
     bot.tick(1, { drop: true });
     bot.tick(3);
@@ -167,7 +167,7 @@ describe('level 1: the ridge job', () => {
     bot.tapAt(good.pos, /Pick up Wheel/);
     bot.approach(hub, 1.25, side);
     bot.tapAt(tyre, /Fit the wheel/);
-    for (const b of slot.bolts!) bot.torqueAt(m.world(b.pos));
+    slot.bolts!.forEach((_, i) => bot.torqueAt(m.boltPos(slot.id, i)));
     bot.approach(jp, 1.1, outside(m, jp));
     bot.holdAt(jp, 1.2, /Lower the jack/);
     bot.tapAt(jp, /Pull the jack out/);
@@ -207,7 +207,7 @@ describe('level 1: the ridge job', () => {
     bot.tapAt(lt.world(lterm.neg), /Unclip the black/);
     bot.tapAt(lt.world(lterm.pos), /Unclip the red/);
     const lslot = lt.comp<SlotDef>('battery');
-    bot.loosenAt(lt.world(lslot.bolts![0].pos));
+    bot.loosenAt(lt.boltPos(lslot.id, 0));
     expect(bot.tapAt(lt.world({ ...lslot.pos, y: lslot.pos.y + 0.08 }), /Take off the battery/)).not.toMatch(/\[/);
     bot.tick(2);
     expect(beat()).toBe('camp');
@@ -254,7 +254,7 @@ describe('level 1: the ridge job', () => {
     bot.tapAt(m.world(term.neg), /Unclip the black/);
     bot.tapAt(m.world(term.pos), /Unclip the red/);
     const bslot = m.comp<SlotDef>('battery');
-    bot.loosenAt(m.world(bslot.bolts![0].pos));
+    bot.loosenAt(m.boltPos(bslot.id, 0));
     const battTop = m.world({ x: bslot.pos.x, y: bslot.pos.y + 0.06, z: bslot.pos.z + 0.05 });
     bot.tapAt(battTop, /Take off the dead battery/);
     drop();
@@ -265,7 +265,7 @@ describe('level 1: the ridge job', () => {
     unrack(/Take the battery off the rack/);
     bot.approach(m.world(term.neg), 0.9, frontStand);
     bot.tapAt(battTop, /Fit the battery/);
-    bot.torqueAt(m.world(bslot.bolts![0].pos));
+    bot.torqueAt(m.boltPos(bslot.id, 0));
     bot.tapAt(m.world(term.pos), /Clip on the red/);
     bot.tapAt(m.world(term.neg), /Clip on the black/);
     bot.tick(2);
@@ -275,13 +275,13 @@ describe('level 1: the ridge job', () => {
     // radiator hose + coolant + bleed
     const rh = m.comp<SlotDef>('radHose');
     bot.approach(m.world(rh.pos), 0.9, frontStand);
-    for (const b of rh.bolts!) bot.loosenAt(m.world(b.pos));
+    rh.bolts!.forEach((_, i) => bot.loosenAt(m.boltPos(rh.id, i)));
     bot.tapAt(m.world(rh.pos), /Take off the split radiator hose/);
     drop();
     pick('radiatorHose', /Pick up Radiator Hose/);
     bot.approach(m.world(rh.pos), 0.9, frontStand);
     bot.tapAt(m.world(rh.pos), /Fit the radiator hose/);
-    for (const b of rh.bolts!) bot.torqueAt(m.world(b.pos));
+    rh.bolts!.forEach((_, i) => bot.torqueAt(m.boltPos(rh.id, i)));
     unrack(/Take the coolant jug.* off the rack/);
     const rad = m.world(m.comp<FluidDef>('coolant').pos);
     bot.approach(rad, 0.9, frontStand);
@@ -313,7 +313,7 @@ describe('level 1: the ridge job', () => {
     const fl = m.comp<SlotDef>('fuelLine');
     const flp = m.world(fl.pos);
     bot.approach(flp, 1.4, outside(m, flp, 2));
-    for (const b of fl.bolts!) bot.loosenAt(m.world(b.pos));
+    fl.bolts!.forEach((_, i) => bot.loosenAt(m.boltPos(fl.id, i)));
     bot.tapAt(flp, /Take off the split fuel line/);
     drop();
     const newLine = w.items.list.find((i) => i.kind === 'fuelHose' && i.cond === 'good' && i.state === 'world')!;
@@ -321,7 +321,7 @@ describe('level 1: the ridge job', () => {
     bot.tapAt(newLine.pos, /Pick up Fuel Line/);
     bot.approach(flp, 1.4, outside(m, flp, 2));
     bot.tapAt(flp, /Fit the fuel line/);
-    for (const b of fl.bolts!) bot.torqueAt(m.world(b.pos));
+    fl.bolts!.forEach((_, i) => bot.torqueAt(m.boltPos(fl.id, i)));
     const can = w.items.list.find((i) => i.kind === 'jerrycan' && i.state === 'world')!;
     bot.approach(can.pos, 1.0);
     bot.tapAt(can.pos, /Pick up Jerry Can/);

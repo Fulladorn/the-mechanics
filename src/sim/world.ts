@@ -866,15 +866,35 @@ export class World {
     const eye = p.eye();
     const dir = p.look();
     const cands = this.candidates();
-    this.focus = pickFocus({ origin: eye, dir }, cands, INTERACT_REACH, (c, dist) => {
+    const prev = this.focus;
+    const next = pickFocus({ origin: eye, dir }, cands, INTERACT_REACH, (c, dist) => {
       // Walls and terrain block the crosshair; the thing itself doesn't.
       const hit = this.phys.castRay(eye, dir, dist, G.STATIC | G.DOOR);
       // For boxes `dist` is where the ray enters the face; for spheres allow
       // for the radius (the collider may wrap the thing itself).
-      if (!hit || hit.toi > dist - (c.box ? 0.02 : c.r) - 0.05) return false;
+      if (!hit || hit.toi > dist - (c.box ? (c.box.slack ?? 0.02) : c.r) - 0.05) return false;
       const owner = hit.tag?.owner ?? '';
       return !(c.target && owner && c.target.startsWith(owner));
     });
+    // Mid-hold on a nut, stay locked to it while the crosshair is still
+    // roughly on it: a little wobble onto the neighbouring nut shouldn't
+    // throw away the progress you've built up.
+    const busy = prev && (this.holdId === 'u:' + prev.id || this.torquing?.id === prev.id);
+    if (busy && next?.id !== prev.id) {
+      const same = cands.find((c) => c.id === prev.id);
+      if (same) {
+        const dx = same.pos.x - eye.x;
+        const dy = same.pos.y - eye.y;
+        const dz = same.pos.z - eye.z;
+        const t = dx * dir.x + dy * dir.y + dz * dir.z;
+        const off = Math.hypot(dx - dir.x * t, dy - dir.y * t, dz - dir.z * t);
+        if (t > 0 && t < INTERACT_REACH + 0.3 && off < 0.11) {
+          this.focus = same;
+          return;
+        }
+      }
+    }
+    this.focus = next;
   }
 
   private handleInteract(intent: Intent, pressedE: boolean, dt: number): void {

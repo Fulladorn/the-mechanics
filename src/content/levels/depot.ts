@@ -301,9 +301,10 @@ export function makeDepot(): LevelDef {
       finish: (w) => w.say("That's your job sheet. Hold Tab any time to see what's broken and what to do next."),
       hints: [[30, 'Walk up to the truck, look at it, hold E.']],
     },
-    systemBeat('tire', 'tire', 'Fix the flat tyre', "Rear tyre's flat. Jack under the jack point, pump it up, nuts off, wheel off. New wheels are in the storeroom.", [
-      [70, 'Stuck? Hold Tab — the job sheet always says the next step.'],
-      [150, 'Jack first, then nuts. Or nuts first, then jack. Either way the wheel’s not coming off by itself.'],
+    systemBeat('tire', 'tire', 'Fix the flat — rear-left tyre', "Rear-left tyre's flat — driver's side, at the back. Crack all five lug nuts loose first: aim at a nut and HOLD left mouse till it drops. Then jack her up, pull the wheel, and swap in a good one from the storeroom rack.", [
+      [45, 'The glowing nuts are the ones still on. Aim right at one and hold left mouse.'],
+      [90, 'Stuck? Hold Tab — the job sheet always says the next step.'],
+      [160, 'Nuts off, jack under the jack point just in front of that wheel, pump it, then E on the wheel to pull it.'],
     ]),
     systemBeat('battery', 'battery', 'Swap the dead battery', 'Battery next. Pop the hood. Black terminal off first, then red. Going back on, red first, black last. Get it backwards and you’ll find out why.', [
       [90, 'New batteries are on the pallet in the storeroom.'],
@@ -486,7 +487,7 @@ export function makeDepot(): LevelDef {
       }
       // Teaching moments, the first time each thing comes up.
       const f = w.focus;
-      if (f?.verb === 'loosen' && !f.disabled) w.once('t_loosen', () => w.say('Hold left mouse on a nut. The wrench does the rest.'));
+      if (f?.verb === 'loosen' && !f.disabled) w.once('t_loosen', () => w.say('That’s it — hold left mouse. Keep it on the nut till the ring fills and it drops.'));
       if (f?.verb === 'torque' && !f.disabled)
         w.once('t_torque', () => w.say('Now torque them: hold left mouse, watch the ring, let go in the green. Too far and the thread slips.'));
       if (f?.label.startsWith('Slide the jack')) w.once('t_jack', () => w.say('Jack goes under there. E to place it, then hold E to pump.'));

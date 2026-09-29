@@ -27,6 +27,15 @@ export interface TargetBox {
   hy: number;
   hz: number;
   rot?: Quat;
+  /**
+   * How far off-centre still counts as "on it" when scoring (default 0.15:
+   * big flat boards and doors are the target anywhere on their face). Smaller
+   * things that sit among other targets (a tyre next to its jack point) use
+   * their size, so the neighbour you're actually pointing at wins.
+   */
+  offCap?: number;
+  /** Depth the world's colliders may overlap the face before it counts as hidden (default 0.02). */
+  slack?: number;
 }
 
 export interface Interactable {
@@ -139,7 +148,7 @@ export function pickFocus(
       // pointing at wins), minus a bonus per priority level (so a nut beats
       // the wheel it sits on). A box you're inside the face of counts as
       // dead centre — it's big on purpose.
-      const off = c.box ? Math.min(perpDist(ray, c.pos), 0.15) : perpDist(ray, c.pos);
+      const off = c.box ? Math.min(perpDist(ray, c.pos), c.box.offCap ?? 0.15) : perpDist(ray, c.pos);
       const s = t + 3 * off - Math.max(0, pri) * 0.2;
       if (s >= bestScore) continue;
       if (occluded?.(c, t)) continue;

@@ -31,7 +31,8 @@ export const DEFAULT_BINDS: Record<Action, string> = {
   left: 'KeyA',
   right: 'KeyD',
   jump: 'Space',
-  crouch: 'ControlLeft',
+  // Not Ctrl: Ctrl+W (crouch-walk) closes the browser tab, and pages can't stop it.
+  crouch: 'KeyC',
   sprint: 'ShiftLeft',
   interact: 'KeyE',
   use: 'Mouse0',

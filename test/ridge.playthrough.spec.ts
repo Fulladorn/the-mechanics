@@ -5,7 +5,7 @@ import { makeRidge } from '../src/content/levels/ridge';
 import { RIDGE } from '../src/content/levels/ridgeTerrain';
 import type { CoverDef, FluidDef, JackDef, Machine, PanelDef, SlotDef, TerminalsDef } from '../src/sim/machine';
 import { readings, SAFE_TARGET } from '../src/sim/puzzles/valveBalance';
-import type { ItemKind } from '../src/sim/items';
+import { itemLabel, type ItemKind } from '../src/sim/items';
 import { Bot } from './bot';
 
 // The whole of The Ridge Job, headless: every prompt is reached by aiming at
@@ -69,10 +69,13 @@ describe('level 1: the ridge job', () => {
       bot.approach(rp, 1.1, { x: rp.x, y: 0, z: rp.z + 3 });
       bot.tapAt(rp, re);
     };
+    // Look at the strapped part you want (each one is its own target).
     const unrack = (re: RegExp) => {
       const rp = atv.world(atv.def.rack!);
       bot.approach(rp, 1.1, { x: rp.x, y: 0, z: rp.z + 3 });
-      bot.tapAt({ ...rp, y: rp.y + 0.3 }, re);
+      const it = atv.rack.map((id) => w.items.get(id)!).find((i) => re.test(`Take the ${itemLabel(i).toLowerCase()} off the rack`));
+      expect(it, `${re} on the rack`).toBeTruthy();
+      bot.tapAt(it!.pos, re);
     };
     bot.tick(20);
     expect(beat()).toBe('chock');
@@ -258,10 +261,7 @@ describe('level 1: the ridge job', () => {
     const battTop = m.world({ x: bslot.pos.x, y: bslot.pos.y + 0.06, z: bslot.pos.z + 0.05 });
     bot.tapAt(battTop, /Take off the dead battery/);
     drop();
-    unrack(/Take the fuel line off the rack/);
-    drop();
-    unrack(/Take the jerry can.* off the rack/);
-    drop();
+    // The rack hands you what the job needs (it's a flatbed, not a stack).
     unrack(/Take the battery off the rack/);
     bot.approach(m.world(term.neg), 0.9, frontStand);
     bot.tapAt(battTop, /Fit the battery/);
@@ -316,15 +316,11 @@ describe('level 1: the ridge job', () => {
     fl.bolts!.forEach((_, i) => bot.loosenAt(m.boltPos(fl.id, i)));
     bot.tapAt(flp, /Take off the split fuel line/);
     drop();
-    const newLine = w.items.list.find((i) => i.kind === 'fuelHose' && i.cond === 'good' && i.state === 'world')!;
-    bot.approach(newLine.pos, 1.0);
-    bot.tapAt(newLine.pos, /Pick up Fuel Line/);
+    unrack(/Take the fuel line off the rack/);
     bot.approach(flp, 1.4, outside(m, flp, 2));
     bot.tapAt(flp, /Fit the fuel line/);
     fl.bolts!.forEach((_, i) => bot.torqueAt(m.boltPos(fl.id, i)));
-    const can = w.items.list.find((i) => i.kind === 'jerrycan' && i.state === 'world')!;
-    bot.approach(can.pos, 1.0);
-    bot.tapAt(can.pos, /Pick up Jerry Can/);
+    unrack(/Take the jerry can.* off the rack/);
     const tank = m.world(m.comp<FluidDef>('fuel').pos);
     bot.approach(tank, 1.0, outside(m, tank, 1.5));
     bot.holdAt(tank, 2.8, /Pour fuel/);

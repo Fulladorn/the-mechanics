@@ -231,8 +231,9 @@ export class Hud {
     // waypoint
     const mk = c.cinematic || c.panel ? null : w.marker();
     if (mk) {
-      const s = c.project({ x: mk.x, y: mk.y + 0.6, z: mk.z });
       const d = Math.hypot(mk.x - c.camPos.x, mk.y - c.camPos.y, mk.z - c.camPos.z);
+      // Float above far targets (a building); sit on near ones (a lug nut).
+      const s = c.project({ x: mk.x, y: mk.y + Math.min(0.6, d * 0.08), z: mk.z });
       const m = 60;
       let x = s.x;
       let y = s.y;

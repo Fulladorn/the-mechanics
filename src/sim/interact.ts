@@ -69,6 +69,9 @@ export interface Ray {
 
 export const INTERACT_REACH = 3.1;
 
+/** Score handicap for a disabled target, so a usable one under the crosshair wins. */
+const DISABLED_PENALTY = 0.6;
+
 /** Distance along the ray to a sphere, or -1 when missed. */
 function raySphere(ray: Ray, c: Vec3, r: number): number {
   const ox = ray.origin.x - c.x;
@@ -149,7 +152,9 @@ export function pickFocus(
       // the wheel it sits on). A box you're inside the face of counts as
       // dead centre — it's big on purpose.
       const off = c.box ? Math.min(perpDist(ray, c.pos), c.box.offCap ?? 0.15) : perpDist(ray, c.pos);
-      const s = t + 3 * off - Math.max(0, pri) * 0.2;
+      // A prompt you can't use never beats one you can: it only shows (with
+      // its reason) when nothing usable is under the crosshair.
+      const s = t + 3 * off - Math.max(0, pri) * 0.2 + (c.disabled ? DISABLED_PENALTY : 0);
       if (s >= bestScore) continue;
       if (occluded?.(c, t)) continue;
       best = c;
@@ -171,10 +176,12 @@ export function pickFocus(
       if (cos <= 0) continue;
       const ang = Math.acos(Math.min(1, cos));
       const allow = 0.085 + Math.atan(c.r / d) * 0.6;
-      if (ang > allow || ang >= bestAng) continue;
+      if (ang > allow) continue;
+      const rank = ang + (c.disabled ? 0.2 : 0);
+      if (rank >= bestAng) continue;
       if (occluded?.(c, d)) continue;
       best = c;
-      bestAng = ang;
+      bestAng = rank;
     }
     if (best) return best;
   }

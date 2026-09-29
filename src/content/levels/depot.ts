@@ -247,20 +247,13 @@ export function makeDepot(): LevelDef {
   // --- the job -------------------------------------------------------------------------------------
   const M = 'betsy';
   const step = (w: World, sys: string) => w.machine(M).nextStep(sys, w.ctx);
-  const stepMarker = (w: World, sys: string): Vec3 | null => {
-    const s = step(w, sys);
-    if (!s) return null;
-    if (s.need) {
-      const it = w.nearestItem(s.need);
-      if (it) return it.pos;
-    }
-    return s.pos ?? null;
-  };
+  const stepMarker = (w: World, sys: string): Vec3 | null => w.markerFor(step(w, sys));
   const systemBeat = (id: string, sys: string, text: string, start: string, hints: [number, string][]): BeatDef => ({
     id,
     text,
-    detail: (w) => step(w, sys)?.text ?? null,
+    detail: (w) => w.handsFor(step(w, sys))?.text ?? null,
     marker: (w) => stepMarker(w, sys),
+    targets: (w) => w.targetsFor(step(w, sys)),
     start: (w) => w.say(start),
     done: (w) => w.systemOk(M, sys),
     hints,
@@ -296,6 +289,7 @@ export function makeDepot(): LevelDef {
       text: 'Inspect Betsy',
       detail: 'Look at the truck and hold E',
       marker: (w) => w.machine(M).pos,
+      targets: () => [`machine:${M}:inspect:all`],
       start: (w) => w.say("That's Betsy. She's been every rookie's first patient since before you were born. Give her a once-over."),
       done: (w) => w.machine(M).state.inspected,
       finish: (w) => w.say("That's your job sheet. Hold Tab any time to see what's broken and what to do next."),
@@ -462,6 +456,7 @@ export function makeDepot(): LevelDef {
     ground: [{ x0: -12.6, z0: -9.6, x1: 12.6, z1: 9.6, color: 0x9a968e, grass: 0 }],
     par: 480,
     safe: true,
+    guidance: 'always',
     briefing: 'Morning, rookie. Welcome to the Company. Punch in before you touch anything — Legal gets weird about it.',
     tick: (w, dt) => {
       // Gates: pass them in order with the truck.

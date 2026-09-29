@@ -1,7 +1,7 @@
 import type { Vec3 } from '../../shared/math';
 import { Terrain } from '../../sim/terrain';
 import type { World } from '../../sim/world';
-import type { ItemSpawn } from '../../sim/items';
+import { itemLabel, type ItemKind, type ItemSpawn } from '../../sim/items';
 import { Kit, furnish } from '../kit';
 import { natureColliders, scatter } from '../nature';
 import {
@@ -322,6 +322,8 @@ export function makeRidge(): LevelDef {
     { kind: 'medkit', pos: { x: rx1 - 0.4, y: ry + 1.3, z: R.z - 1.2 } },
     // sawmill
     { kind: 'jerrycan', fill: 1, pos: { x: gen.x - 1.2, y: gy(gen.x - 1.2, gen.z + 1) + 0.3, z: gen.z + 1 } },
+    // campers keep a spare can by the RV (empty — that's what the siphon's for)
+    { kind: 'jerrycan', fill: 0, pos: rvLocal(1.6, 1.5, 0.3) },
     // RV storage bin
     { kind: 'fuelHose', pos: { x: rvBin.x, y: rvBin.y - 0.1, z: rvBin.z }, hiddenUntil: 'rvBin' },
     { kind: 'radiatorHose', pos: { x: rvBin.x + 0.4, y: rvBin.y - 0.1, z: rvBin.z + 0.2 }, hiddenUntil: 'rvBin' },
@@ -334,20 +336,44 @@ export function makeRidge(): LevelDef {
   // --- beats --------------------------------------------------------------------------------------
   const car = (w: World) => w.vehicle(M);
   const step = (w: World, sys: string) => w.machine(M).nextStep(sys, w.ctx);
-  const stepMarker = (w: World, sys: string): Vec3 | null => {
-    const s = step(w, sys);
-    if (!s) return null;
-    if (s.need && !w.carrying(s.need)) {
-      const it = w.nearestItem(s.need);
-      if (it) return it.pos;
+  /**
+   * Raiding the RV: two hoses and a can of siphoned fuel, one pair of hands.
+   * Siphon first if you're already holding the can; otherwise strap what you
+   * hold to the quad's rack before grabbing the next thing.
+   */
+  const haul = (w: World): { marker: Vec3 | null; targets: string[]; stow?: string; drop?: string } => {
+    if (!w.flag('rvBin')) return { marker: rvBin, targets: ['station:rvBin'] };
+    const needFuelLine = !w.carrying('fuelHose') && !w.systemOk(M, 'fuel');
+    const needRadHose = !w.carrying('radiatorHose') && !w.systemOk(M, 'coolant');
+    const needSiphon = !w.flag('siphoned') && !w.systemOk(M, 'fuel');
+    const held = w.heldItem();
+    if (needSiphon && held?.kind === 'jerrycan') return { marker: rvFiller, targets: ['station:siphon'] };
+    if (held && (needFuelLine || needRadHose || needSiphon)) {
+      const label = held.kind === 'jerrycan' ? 'jerry can' : held.kind === 'fuelHose' ? 'fuel line' : held.kind === 'radiatorHose' ? 'radiator hose' : itemLabel(held).toLowerCase();
+      if (!w.worthKeeping(held)) return { marker: w.playerPos(), targets: [], drop: label };
+      const rack = w.stowRack();
+      if (rack) return { marker: rack.world(rack.def.rack!), targets: [`vehicle:${rack.key}:rack`], stow: held.kind === 'jerrycan' ? 'jerry can' : held.kind === 'fuelHose' ? 'fuel line' : held.kind === 'radiatorHose' ? 'radiator hose' : 'load' };
     }
-    return s.pos ?? null;
+    const fetch = (kind: ItemKind, good = true, emptyOk = false) => {
+      const where = w.whereIs(kind, good, emptyOk);
+      if (where.at === 'rack') return { marker: where.item!.pos, targets: [`vehicle:${where.vehicle}:unrack:${where.item!.id}`] };
+      if (where.at === 'world') return { marker: where.item!.pos, targets: [`item:${where.item!.id}`] };
+      return null;
+    };
+    if (needFuelLine) return fetch('fuelHose') ?? { marker: rvBin, targets: [] };
+    if (needRadHose) return fetch('radiatorHose') ?? { marker: rvBin, targets: [] };
+    if (needSiphon) return fetch('jerrycan', false, true) ?? { marker: rvFiller, targets: [] };
+    return { marker: rvFiller, targets: [] };
   };
+  /** Taking a part off a donor: what to do next, and exactly where. */
+  const salvage = (w: World, key: string, slot: string) => w.machine(key).removeStep(slot, w.ctx);
+  const stepMarker = (w: World, sys: string): Vec3 | null => w.markerFor(step(w, sys));
   const systemBeat = (id: string, sys: string, text: string, start: string, hints: [number, string][]): BeatDef => ({
     id,
     text,
-    detail: (w) => step(w, sys)?.text ?? null,
+    detail: (w) => w.handsFor(step(w, sys))?.text ?? null,
     marker: (w) => stepMarker(w, sys),
+    targets: (w) => w.targetsFor(step(w, sys)),
     start: (w) => {
       if (!w.systemOk(M, sys)) w.say(start);
     },
@@ -442,6 +468,7 @@ export function makeRidge(): LevelDef {
       text: 'Inspect the Ridgeback',
       detail: 'Look at it and hold E',
       marker: (w) => car(w).pos,
+      targets: () => [`machine:${M}:inspect:all`],
       done: (w) => w.machine(M).state.inspected,
       finish: (w) =>
         w.say('Flat front tyre, cracked battery, split hoses, bone-dry tank, and the ignition fuses have been pulled and shoved back wrong. Somebody really didn’t want this truck leaving. Hold Tab for the job sheet.'),
@@ -464,6 +491,11 @@ export function makeRidge(): LevelDef {
       text: 'Get into the ranger station',
       detail: (w) => (w.hasItem('key', 'ranger') ? 'You’ve got the key' : 'Locked. Rangers keep a spare in the truck'),
       marker: (w) => (w.hasItem('key', 'ranger') ? at(rx0, R.z - 0.8, 1) : w.items.list.find((i) => i.kind === 'key' && i.tag === 'ranger')?.pos ?? null),
+      targets: (w) => {
+        if (w.hasItem('key', 'ranger')) return ['door:rangerDoor'];
+        const key = w.items.list.find((i) => i.kind === 'key' && i.tag === 'ranger');
+        return key ? [`item:${key.id}`] : [];
+      },
       start: (w) => w.say('Locked, naturally. There’s a ranger pickup round the back — they always leave a spare key on the dash.'),
       done: (w) => !!w.doors.get('rangerDoor')?.open,
       finish: (w) => w.setFlag('stationOpen'),
@@ -482,8 +514,9 @@ export function makeRidge(): LevelDef {
     {
       id: 'wheel',
       text: 'Take a wheel off the ranger’s pickup',
-      detail: (w) => step(w, 'wheel') && !w.carrying('wheel') ? 'It’s up on blocks — just undo the lug nuts' : 'Got it',
-      marker: (w) => (w.carrying('wheel') ? null : w.machine('rangerPickup').world({ x: -0.8, y: -0.5, z: -1.42 })),
+      detail: (w) => (w.carrying('wheel') ? 'Got it' : (salvage(w, 'rangerPickup', 'wheelFL')?.text ?? 'It’s up on blocks — just undo the lug nuts')),
+      marker: (w) => (w.carrying('wheel') ? null : (salvage(w, 'rangerPickup', 'wheelFL')?.pos ?? null)),
+      targets: (w) => (w.carrying('wheel') ? [] : w.targetsFor(salvage(w, 'rangerPickup', 'wheelFL'))),
       done: (w) => w.carrying('wheel') || w.systemOk(M, 'wheel'),
       finish: (w) => w.say('Heavy, isn’t it. Strap it to the ATV’s rack — E at the back of the quad — and ride it up. Key’s on the hook inside.'),
       hints: [[60, 'Wrench on each lug nut — hold the mouse button till it spins off.']],
@@ -521,25 +554,29 @@ export function makeRidge(): LevelDef {
     {
       id: 'power',
       text: 'Get power to the mill',
-      detail: (w) => (w.systemOk('generator', 'fuel') ? 'Pull the generator’s start cord (hold E)' : 'The generator needs fuel — there’s a jerry can'),
-      marker: (w) => (w.systemOk('generator', 'fuel') || w.carrying('jerrycan') ? at(gen.x, gen.z, 0.7) : w.nearestItem('jerrycan', false)?.pos ?? null),
+      detail: (w) => {
+        if (w.systemOk('generator', 'fuel')) return 'Pull the generator’s start cord (hold E)';
+        const s = w.handsFor(w.machine('generator').nextStep('fuel', w.ctx));
+        return s && s.text.includes('—') ? s.text : 'The generator needs fuel — there’s a jerry can';
+      },
+      marker: (w) =>
+        w.systemOk('generator', 'fuel')
+          ? { x: gen.x - 0.36, y: gy(gen.x, gen.z) + 0.38, z: gen.z + 0.26 }
+          : w.carrying('jerrycan')
+            ? at(gen.x, gen.z, 0.7)
+            : (w.nearestItem('jerrycan', false)?.pos ?? null),
+      targets: (w) => (w.systemOk('generator', 'fuel') ? ['station:pullCord'] : w.targetsFor(w.machine('generator').nextStep('fuel', w.ctx))),
       start: (w) => w.say('Shed door’s electric and the power’s off. There’s a generator round the side. Save some fuel for your truck if you can.'),
       done: (w) => w.flag('millPower'),
-      finish: (w) => w.say('And there’s your logging truck. Battery box is behind the cab.'),
+      finish: (w) => w.say('And there’s your logging truck. Battery box is behind the cab. Hang on to that can if you’ve got room — fuel’s the Ridgeback’s problem too.'),
       hints: [[60, 'Pour the jerry can into the generator, then hold E on it to pull the cord.']],
     },
     {
       id: 'battery',
       text: 'Pull the logging truck’s battery',
-      detail: (w) => {
-        const lt = w.machine('loggingTruck');
-        if (!lt.state.covers.box) return 'Open the battery box';
-        if (lt.state.terminals.batt?.neg) return 'Black terminal off first';
-        if (lt.state.terminals.batt?.pos) return 'Now the red one';
-        if (lt.slotItem(w.items, 'battery')) return 'Undo the hold-down, lift it out';
-        return 'Got it';
-      },
-      marker: (w) => (w.carrying('battery') ? null : w.machine('loggingTruck').world({ x: 1.2, y: -0.2, z: -0.6 })),
+      detail: (w) => (w.carrying('battery') ? 'Got it' : (salvage(w, 'loggingTruck', 'battery')?.text ?? 'Got it')),
+      marker: (w) => (w.carrying('battery') ? null : (salvage(w, 'loggingTruck', 'battery')?.pos ?? null)),
+      targets: (w) => (w.carrying('battery') ? [] : w.targetsFor(salvage(w, 'loggingTruck', 'battery'))),
       done: (w) => w.carrying('battery') || w.systemOk(M, 'battery'),
       finish: (w) => w.say('Good. Hoses next: there’s an RV at the lakeside campground. And fuel — RVs carry plenty. Sun’s going, so shift.'),
     },
@@ -557,18 +594,17 @@ export function makeRidge(): LevelDef {
       id: 'hoses',
       text: 'Raid the RV',
       detail: (w) => {
+        const h = haul(w);
         const need: string[] = [];
         if (!w.carrying('fuelHose') && !w.systemOk(M, 'fuel')) need.push('fuel line');
         if (!w.carrying('radiatorHose') && !w.systemOk(M, 'coolant')) need.push('radiator hose');
         if (!w.flag('siphoned') && !w.systemOk(M, 'fuel')) need.push('fuel (siphon into the jerry can)');
+        if (h.drop) return `Put the ${h.drop} down (G) — you need your hands. Still need: ${need.join(', ')}`;
+        if (h.stow) return `Strap the ${h.stow} to the quad’s rack (E at the back) — you need your hands. Still need: ${need.join(', ')}`;
         return need.length ? `Need: ${need.join(', ')}` : 'Got everything';
       },
-      marker: (w) => {
-        if (!w.flag('rvBin')) return rvBin;
-        if (!w.carrying('fuelHose') && !w.systemOk(M, 'fuel')) return w.nearestItem('fuelHose')?.pos ?? rvBin;
-        if (!w.carrying('radiatorHose') && !w.systemOk(M, 'coolant')) return w.nearestItem('radiatorHose')?.pos ?? rvBin;
-        return rvFiller;
-      },
+      marker: (w) => haul(w).marker,
+      targets: (w) => haul(w).targets,
       start: (w) =>
         w.say(
           w.hasItem('flare')

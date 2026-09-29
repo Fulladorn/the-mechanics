@@ -35,6 +35,11 @@ export interface Settings {
     torqueAssist: boolean;
     /** Speak Dispatch's lines with the browser voice instead of radio chatter. */
     tts: boolean;
+    /**
+     * Glow on whatever the current step wants you to use. auto: always in the
+     * tutorial, after a while stuck on a step in missions.
+     */
+    guidance: 'auto' | 'always' | 'off';
   };
 }
 
@@ -51,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
     colorblind: false,
     torqueAssist: false,
     tts: false,
+    guidance: 'auto',
   },
 };
 

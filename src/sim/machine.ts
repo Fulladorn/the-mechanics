@@ -171,6 +171,19 @@ export const TORQUE_BAND_ASSIST: [number, number] = [0.5, 0.9];
 export const LOOSEN_TIME = 0.45;
 
 const boltKey = (slot: string, i: number) => `${slot}#${i}`;
+
+/**
+ * The next thing to do on a system. `targets` are the exact interactable ids
+ * that advance it (empty when the step is "go and fetch something" — then
+ * `need` names the item). The HUD marks `pos`, the renderer glows `targets`.
+ */
+export interface Step {
+  text: string;
+  pos?: Vec3;
+  targets: string[];
+  need?: ItemKind;
+  where?: string;
+}
 const JACK_FIRST = 'Jack it up first — jack under the jack point beside this wheel, then hold E to pump';
 
 export class Machine {
@@ -417,7 +430,10 @@ export class Machine {
   nextStep(
     sysId: string,
     ctx: MachineCtx,
-  ): { text: string; pos?: Vec3; need?: ItemKind; where?: string } | null {
+  ): Step | null {
+    const T = (kind: string, id: string) => `machine:${this.key}:${kind}:${id}`;
+    const boltIds = (pid: string, want: (b: { s: BoltState }) => boolean) =>
+      this.boltsOf(this.comp<SlotDef>(pid)).flatMap((b, i) => (want(b) ? [T('bolt', `${pid}#${i}`)] : []));
     const sys = this.def.systems.find((x) => x.id === sysId);
     if (!sys) return null;
     const items = ctx.items;
@@ -432,9 +448,9 @@ export class Machine {
           const cover = c.needs?.find((n) => n.startsWith('open:'));
           if (cover && !this.needMet(cover, ctx)) {
             const cv = this.comp<CoverDef>(cover.split(':')[1]);
-            return { text: `Open the ${cv.label.toLowerCase()}`, pos: this.world(cv.pos) };
+            return { text: `Open the ${cv.label.toLowerCase()}`, pos: this.world(cv.pos), targets: [T('cover', cv.id)] };
           }
-          return { text: need, pos: at };
+          return { text: need, pos: at, targets: [] };
         }
         const it = this.slotItem(items, pid);
         const bolts = this.boltsOf(c);
@@ -443,67 +459,105 @@ export class Machine {
         if (it && it.cond === 'bad') {
           if (c.terminals) {
             const t = s.terminals[c.terminals];
-            if (t.neg) return { text: 'Unclip the black (−) terminal first', pos: this.world(this.comp<TerminalsDef>(c.terminals).neg) };
-            if (t.pos) return { text: 'Unclip the red (+) terminal', pos: this.world(this.comp<TerminalsDef>(c.terminals).pos) };
+            if (t.neg) return { text: 'Unclip the black (−) terminal first', pos: this.world(this.comp<TerminalsDef>(c.terminals).neg), targets: [T('term', `${c.terminals}.neg`)] };
+            if (t.pos) return { text: 'Unclip the red (+) terminal', pos: this.world(this.comp<TerminalsDef>(c.terminals).pos), targets: [T('term', `${c.terminals}.pos`)] };
           }
           const loose = bolts.filter((b) => b.s === 'out').length;
           if (loose < total) {
             const next = bolts.findIndex((b) => b.s !== 'out');
-            return { text: `Loosen the ${this.whose(c)}${noun}s — ${loose}/${total} off`, pos: this.boltPos(pid, next) };
+            return { text: `Loosen the ${this.whose(c)}${noun}s — ${loose}/${total} off`, pos: this.boltPos(pid, next), targets: boltIds(pid, (b) => b.s !== 'out') };
           }
           if (c.lift && !this.jackRaised(c.lift)) return this.jackHint(c.lift, ctx);
-          return { text: `Take off the ${c.label ? c.label.toLowerCase() : itemLabel(it).toLowerCase()}`, pos: at };
+          return { text: `Take off the ${c.label ? c.label.toLowerCase() : itemLabel(it).toLowerCase()}`, pos: at, targets: [T('slot', pid)] };
         }
         if (!it) {
           if (c.lift && !this.jackRaised(c.lift)) return this.jackHint(c.lift, ctx);
           const held = ctx.held();
           const label = ITEM_DEFS[c.accepts].label.toLowerCase();
-          if (held && held.kind === c.accepts && held.cond === 'good') return { text: `Fit the ${label} onto the ${c.label ? c.label.toLowerCase().replace(/ wheel$/, '') + ' hub' : 'hub'}`, pos: at };
-          return { text: `Find a good ${label}`, need: c.accepts, where: c.where, pos: at };
+          if (held && held.kind === c.accepts && held.cond === 'good') return { text: `Fit the ${label} onto the ${c.label ? c.label.toLowerCase().replace(/ wheel$/, '') + ' hub' : 'hub'}`, pos: at, targets: [T('slot', pid)] };
+          return { text: `Find a good ${label}`, need: c.accepts, where: c.where, pos: at, targets: [] };
         }
         const tight = bolts.filter((b) => b.s === 'tight').length;
         if (tight < total) {
           const next = bolts.findIndex((b) => b.s !== 'tight');
-          return { text: `Torque the ${this.whose(c)}${noun}s — ${tight}/${total} tight`, pos: this.boltPos(pid, next) };
+          return { text: `Torque the ${this.whose(c)}${noun}s — ${tight}/${total} tight`, pos: this.boltPos(pid, next), targets: boltIds(pid, (b) => b.s !== 'tight') };
         }
         if (c.terminals) {
           const t = s.terminals[c.terminals];
-          if (!t.pos) return { text: 'Clip on the red (+) terminal', pos: this.world(this.comp<TerminalsDef>(c.terminals).pos) };
-          if (!t.neg) return { text: 'Clip on the black (−) terminal', pos: this.world(this.comp<TerminalsDef>(c.terminals).neg) };
+          if (!t.pos) return { text: 'Clip on the red (+) terminal', pos: this.world(this.comp<TerminalsDef>(c.terminals).pos), targets: [T('term', `${c.terminals}.pos`)] };
+          if (!t.neg) return { text: 'Clip on the black (−) terminal', pos: this.world(this.comp<TerminalsDef>(c.terminals).neg), targets: [T('term', `${c.terminals}.neg`)] };
         }
       } else if (c.t === 'terminals') {
         const t = s.terminals[pid];
         if (!this.slotItem(items, c.battery)) continue;
         const need = this.needsReason(c.needs, ctx);
-        if (need) return { text: need, pos: at };
-        if (!t.pos) return { text: 'Clip on the red (+) terminal', pos: this.world(c.pos) };
-        if (!t.neg) return { text: 'Clip on the black (−) terminal', pos: this.world(c.neg) };
+        if (need) return { text: need, pos: at, targets: [] };
+        if (!t.pos) return { text: 'Clip on the red (+) terminal', pos: this.world(c.pos), targets: [T('term', `${pid}.pos`)] };
+        if (!t.neg) return { text: 'Clip on the black (−) terminal', pos: this.world(c.neg), targets: [T('term', `${pid}.neg`)] };
       } else if (c.t === 'fluid') {
         if (c.leakUnless && !this.componentOk(c.leakUnless, items)) continue; // fix the leak first (earlier part)
         const held = ctx.held();
         const def = held ? ITEM_DEFS[held.kind] : undefined;
-        if (held && def?.fluid === c.fluid && held.fill > 0.01) return { text: `Pour ${c.fluid} into the ${c.label.toLowerCase()}`, pos: at };
-        return { text: `Bring ${c.fluid} for the ${c.label.toLowerCase()}`, need: c.fluid === 'fuel' ? 'jerrycan' : 'coolant', pos: at };
+        if (held && def?.fluid === c.fluid && held.fill > 0.01) return { text: `Pour ${c.fluid} into the ${c.label.toLowerCase()}`, pos: at, targets: [T('fluid', pid)] };
+        return { text: `Bring ${c.fluid} for the ${c.label.toLowerCase()}`, need: c.fluid === 'fuel' ? 'jerrycan' : 'coolant', pos: at, targets: [] };
       } else if (c.t === 'panel') {
         const need = this.needsReason(c.needs, ctx);
         if (need) {
           const cover = c.needs?.find((n) => n.startsWith('open:'));
           if (cover) {
             const cv = this.comp<CoverDef>(cover.split(':')[1]);
-            return { text: `Open the ${cv.label.toLowerCase()}`, pos: this.world(cv.pos) };
+            return { text: `Open the ${cv.label.toLowerCase()}`, pos: this.world(cv.pos), targets: [T('cover', cv.id)] };
           }
-          return { text: need, pos: at };
+          return { text: need, pos: at, targets: [] };
         }
-        return { text: `Fix the ${c.label.toLowerCase()}`, pos: at };
+        return { text: `Fix the ${c.label.toLowerCase()}`, pos: at, targets: [T('panel', pid)] };
       } else if (c.t === 'cover') {
-        return { text: `Close the ${c.label.toLowerCase()}`, pos: at };
+        return { text: `Close the ${c.label.toLowerCase()}`, pos: at, targets: [T('cover', pid)] };
       } else if (c.t === 'jack') {
         const j = s.jacks[pid];
-        if (j.state === 'raised') return { text: 'Lower the jack', pos: at };
-        if (j.state === 'placed') return { text: 'Pull the jack out', pos: at };
+        if (j.state === 'raised') return { text: 'Lower the jack', pos: at, targets: [T('jack', pid) + ':lower'] };
+        if (j.state === 'placed') return { text: 'Pull the jack out', pos: at, targets: [T('jack', pid) + ':take'] };
       }
     }
     return null;
+  }
+
+  /**
+   * Taking a part OFF (salvaging from a donor): the same plain-words step,
+   * progress and exact targets as a repair, or null once it's in your hands.
+   */
+  removeStep(slotId: string, ctx: MachineCtx): Step | null {
+    const c = this.comp<SlotDef>(slotId);
+    const it = this.slotItem(ctx.items, slotId);
+    if (!it) return null;
+    const T = (kind: string, id: string) => `machine:${this.key}:${kind}:${id}`;
+    const need = this.needsReason(c.needs, ctx);
+    if (need) {
+      const cover = c.needs?.find((n) => n.startsWith('open:'));
+      if (cover && !this.needMet(cover, ctx)) {
+        const cv = this.comp<CoverDef>(cover.split(':')[1]);
+        return { text: `Open the ${cv.label.toLowerCase()}`, pos: this.world(cv.pos), targets: [T('cover', cv.id)] };
+      }
+      return { text: need, pos: this.slotPoint(slotId, c.pos), targets: [] };
+    }
+    if (c.terminals) {
+      const tr = this.state.terminals[c.terminals];
+      const td = this.comp<TerminalsDef>(c.terminals);
+      if (tr.neg) return { text: 'Unclip the black (−) terminal first', pos: this.world(td.neg), targets: [T('term', `${c.terminals}.neg`)] };
+      if (tr.pos) return { text: 'Unclip the red (+) terminal', pos: this.world(td.pos), targets: [T('term', `${c.terminals}.pos`)] };
+    }
+    const bolts = this.boltsOf(c);
+    const off = bolts.filter((b) => b.s === 'out').length;
+    if (off < bolts.length) {
+      const next = bolts.findIndex((b) => b.s !== 'out');
+      return {
+        text: `Loosen the ${this.whose(c)}${c.boltNoun ?? 'bolt'}s — ${off}/${bolts.length} off`,
+        pos: this.boltPos(slotId, next),
+        targets: bolts.flatMap((b, i) => (b.s !== 'out' ? [T('bolt', `${slotId}#${i}`)] : [])),
+      };
+    }
+    if (c.lift && !this.jackRaised(c.lift)) return this.jackHint(c.lift, ctx);
+    return { text: `Take off the ${(c.label ?? itemLabel(it)).toLowerCase()}`, pos: this.slotPoint(slotId, c.pos), targets: [T('slot', slotId)] };
   }
 
   /**
@@ -524,13 +578,14 @@ export class Machine {
     return c.accepts === 'wheel' && c.label ? `${c.label.toLowerCase()}'s ` : '';
   }
 
-  private jackHint(id: string, ctx: MachineCtx): { text: string; pos?: Vec3; need?: ItemKind } {
+  private jackHint(id: string, ctx: MachineCtx): Step {
     const j = this.state.jacks[id];
     const at = this.world(this.comp<JackDef>(id).pos);
-    if (j.state === 'placed') return { text: 'Pump the jack to lift it', pos: at };
+    const t = [`machine:${this.key}:jack:${id}`];
+    if (j.state === 'placed') return { text: 'Pump the jack to lift it', pos: at, targets: [`${t[0]}:raise`] };
     const held = ctx.held();
-    if (held?.kind === 'jack') return { text: 'Slide the jack under the jack point', pos: at };
-    return { text: 'Find a jack', need: 'jack', pos: at };
+    if (held?.kind === 'jack') return { text: 'Slide the jack under the jack point', pos: at, targets: t };
+    return { text: 'Find a jack', need: 'jack', pos: at, targets: [] };
   }
 
   // --- interactions -------------------------------------------------------------
@@ -728,11 +783,13 @@ export class Machine {
         }
       });
 
-      // Pull the part.
-      if (!held) {
+      // Pull the part. (With your hands full the prompt still shows, and says
+      // so — a step you can't see a prompt for reads as a broken game.)
+      {
         const bolts = this.boltsOf(c);
         const loose = bolts.filter((b) => b.s === 'out').length;
         let why: string | null = access;
+        if (!why && held) why = `Hands full — put the ${itemLabel(held).toLowerCase()} down (G to drop)`;
         if (!why && loose < bolts.length) why = `Loosen the ${noun}s first — aim at one, hold left mouse (${loose}/${bolts.length} off)`;
         if (!why && c.terminals) {
           const t = s.terminals[c.terminals];
@@ -782,16 +839,18 @@ export class Machine {
           ctx.emit({ t: 'partOn', machine: this.key, slot: c.id, item: part.id, pos: at });
         },
       });
-    } else if (!held) {
-      // Looking at an empty mount tells you what goes there.
+    } else {
+      // Looking at an empty mount tells you what goes there (and, with the
+      // wrong thing in your hands, what to do about it).
+      const need = ITEM_DEFS[c.accepts].label.toLowerCase();
       out.push({
         id: tgt('slot', c.id),
         pos: at,
         r: c.r ?? 0.3,
-        label: `Empty: needs a ${ITEM_DEFS[c.accepts].label.toLowerCase()}`,
+        label: `Empty: needs a ${need}`,
         verb: 'tap',
         priority: -2,
-        disabled: c.where ? `Look ${c.where}` : 'Find one',
+        disabled: held ? `That's a ${itemLabel(held).toLowerCase()} — put it down (G) and bring a ${need}` : c.where ? `Look ${c.where}` : 'Find one',
         target: tgt('ghost', c.id),
       });
     }

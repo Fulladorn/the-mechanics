@@ -45,6 +45,9 @@ export interface FrameInput {
   cine?: { pos: THREE.Vector3; quat: THREE.Quaternion } | null;
 }
 
+/** Missions: seconds on a step before its targets start to glow. */
+const GUIDE_DELAY = 20;
+
 export class GameView {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -72,6 +75,9 @@ export class GameView {
   private tmpV = new THREE.Vector3();
   private tmpV2 = new THREE.Vector2();
   private tmpC = new THREE.Color();
+  private guideBeat = '';
+  private guideIds = new Set<string>();
+  private guideSince = 0;
   private water?: Water;
   private wolves?: WolfPack;
   private ambient = 1;
@@ -508,6 +514,32 @@ export class GameView {
     // would outline half the screen; the prompt is enough.
     const big = !!f && (f.priority ?? 0) < 0;
     this.highlight.focus(f && !big ? this.resolveTarget(f.target) : null, !!f?.disabled);
+
+    // Next-step glow: softly mark what the current step wants you to use.
+    // Missions hold it back until you've been on a step a while; the
+    // tutorial always shows it. The timer restarts only on a new step (new
+    // targets appearing), not as you tick targets off it.
+    const guide = w.player.mode === 'foot' ? w.guide() : [];
+    const ids = new Set(guide.map((c) => c.id));
+    const beat = w.currentBeat()?.id ?? '';
+    if (beat !== this.guideBeat || [...ids].some((id) => !this.guideIds.has(id))) {
+      this.guideBeat = beat;
+      this.guideSince = w.elapsed;
+    }
+    this.guideIds = ids;
+    const pref = this.settings.accessibility.guidance;
+    const mode = pref === 'auto' ? (this.level.guidance ?? 'delayed') : pref;
+    const on = mode === 'always' || (mode === 'delayed' && w.elapsed - this.guideSince > GUIDE_DELAY);
+    const hints: THREE.Object3D[] = [];
+    if (on) {
+      for (const c of guide) {
+        // (not whole-vehicle targets like "Inspect": the prompt covers those)
+        if (c.id === f?.id || c.disabled || (c.priority ?? 0) < 0) continue;
+        const o = this.resolveTarget(c.target);
+        if (o) hints.push(o);
+      }
+    }
+    this.highlight.hint(hints);
 
     // Ghost the carried part into every slot it fits (nearby), strongest on
     // the one under the crosshair.

@@ -59,7 +59,7 @@ function lockers(p: PropDef): PropBuild {
     }
     const handle = mesh(rbox(0.03, 0.14, 0.03, 0.01), MAT.chrome(), w - 0.12, 1.0, 0.03);
     pivot.add(handle);
-    const tag = textTexture([{ text: names[i], size: 90, color: names[i] === 'ROOKIE' ? '#d9463b' : '#1d2a3a', y: 64 }], 256, 128, '#f3e9cf');
+    const tag = textTexture([{ text: names[i], size: Math.min(90, Math.floor(520 / names[i].length)), color: names[i] === 'ROOKIE' ? '#d9463b' : '#1d2a3a', y: 64 }], 256, 128, '#f3e9cf');
     const label = mesh(new THREE.PlaneGeometry(w * 0.7, w * 0.35), styl({ map: tag, rough: 0.7, noise: 0 }), w / 2, 1.45, 0.02);
     label.rotation.z = names[i] === 'ROOKIE' ? 0.06 : 0;
     pivot.add(label);
@@ -232,6 +232,20 @@ function shelf(p: PropDef): PropBuild {
       g.add(b);
     }
     for (let i = 0; i < 6; i++) g.add(mesh(rbox(0.22, 0.3, 0.22, 0.02), styl({ color: [0xd9463b, 0x2f7fd1, C.cream][i % 3], rough: 0.6 }), -0.8 + i * 0.32, 1.72, 0));
+  }
+  if (str(p, 'fill') === 'supplies') {
+    // a backcountry station's stores: blankets, rope, tins, lamp oil, first aid
+    const blanket = [0x8a2f2a, 0x3f5b3a, 0x6b5a3a];
+    for (let i = 0; i < 3; i++) g.add(mesh(rbox(0.5, 0.12, 0.4, 0.04), MAT.fabric(blanket[i]), -0.7, 0.43 + i * 0.125, 0));
+    const rope = mesh(torus(0.16, 0.05, 8, 18), styl({ color: 0xc9a86a, rough: 0.95, noise: 0.3, noiseScale: 8 }), 0.1, 0.42, 0);
+    rope.rotation.x = Math.PI / 2;
+    g.add(rope);
+    g.add(mesh(rbox(0.38, 0.26, 0.2, 0.03), styl({ color: 0xf2f0ea, rough: 0.5 }), 0.7, 0.5, 0));
+    g.add(mesh(rbox(0.1, 0.03, 0.01, 0.005), styl({ color: C.red }), 0.7, 0.52, 0.105));
+    g.add(mesh(rbox(0.03, 0.1, 0.01, 0.005), styl({ color: C.red }), 0.7, 0.52, 0.105));
+    for (let i = 0; i < 7; i++) g.add(mesh(cyl(0.05, 0.05, 0.12, 12), MAT.metal(i % 2 ? 0xb8bfc8 : 0xa8763a, 0.4), -0.85 + i * 0.13, 1.03, (i % 2) * 0.1 - 0.05));
+    for (let i = 0; i < 2; i++) g.add(mesh(cyl(0.09, 0.09, 0.28, 14), styl({ color: 0x3f6d8f, rough: 0.5, metal: 0.3 }), 0.35 + i * 0.25, 1.11, 0));
+    for (let i = 0; i < 3; i++) g.add(mesh(rbox(0.28, 0.2, 0.3, 0.02), styl({ color: [0x9a7a52, 0xb89a6a, 0x8a6a42][i], rough: 0.9, noise: 0.2 }), -0.6 + i * 0.4, 1.67, 0));
   }
   return { obj: g };
 }
@@ -792,7 +806,100 @@ function rollup(): THREE.Group {
   return g;
 }
 
+function crewTable(): PropBuild {
+  // Break-room table: formica top, two chairs, the day's clutter.
+  const g = new THREE.Group();
+  g.add(mesh(rbox(1.0, 0.04, 0.7, 0.015), styl({ color: 0xd8c9a3, rough: 0.45, noise: 0.05 }), 0, 0.74, 0));
+  g.add(mesh(rbox(1.02, 0.03, 0.72, 0.01), MAT.chrome(), 0, 0.71, 0));
+  for (const [x, z] of [[-0.44, -0.29], [0.44, -0.29], [-0.44, 0.29], [0.44, 0.29]]) g.add(mesh(cyl(0.02, 0.02, 0.7, 8), MAT.chrome(), x, 0.35, z));
+  const seat = styl({ color: 0xc8553d, rough: 0.6, noise: 0.06 });
+  for (const [sz, yaw] of [[-0.58, 0.15], [0.6, Math.PI - 0.3]] as const) {
+    const ch = new THREE.Group();
+    ch.add(mesh(rbox(0.42, 0.05, 0.4, 0.02), seat, 0, 0.45, 0));
+    ch.add(mesh(rbox(0.42, 0.34, 0.04, 0.02), seat, 0, 0.7, -0.19));
+    for (const [x, z] of [[-0.18, -0.17], [0.18, -0.17], [-0.18, 0.17], [0.18, 0.17]]) ch.add(mesh(cyl(0.012, 0.012, 0.44, 6), MAT.darkMetal(), x, 0.22, z));
+    ch.position.set(0.05, 0, sz);
+    ch.rotation.y = yaw;
+    g.add(ch);
+  }
+  // mugs, a newspaper, a deck of cards
+  for (const [x, z, c] of [[-0.3, 0.12, C.cream], [0.25, -0.18, C.orange]] as const) {
+    g.add(mesh(cyl(0.04, 0.035, 0.09, 12), styl({ color: c, rough: 0.35 }), x, 0.805, z));
+  }
+  const paper = mesh(rbox(0.36, 0.01, 0.26, 0.002), styl({ color: 0xe9e4d6, rough: 0.9 }), 0.1, 0.765, 0.1);
+  paper.rotation.y = 0.35;
+  g.add(paper);
+  g.add(mesh(rbox(0.06, 0.02, 0.09, 0.004), styl({ color: 0x2a5fa8, rough: 0.6 }), -0.1, 0.77, -0.15));
+  return { obj: g };
+}
+
+function fridge(): PropBuild {
+  const g = new THREE.Group();
+  const body = styl({ color: 0xece6d6, rough: 0.35, metal: 0.1, noise: 0.04 });
+  g.add(mesh(rbox(0.7, 1.72, 0.64, 0.05), body, 0, 0.86, 0));
+  // freezer seam and handles
+  g.add(mesh(rbox(0.68, 0.012, 0.01, 0.003), styl({ color: 0x8a8578 }), 0, 1.25, 0.322));
+  for (const y of [1.45, 0.95]) g.add(mesh(rbox(0.03, 0.2, 0.04, 0.01), MAT.chrome(), 0.28, y, 0.34));
+  // magnets and a note that says what everybody's thinking
+  const note = textTexture([{ text: 'LABEL YOUR', size: 30, color: '#333', y: 70 }, { text: 'LUNCH. — MGMT', size: 30, color: '#333', y: 120 }], 256, 180, '#fff7b0');
+  const n = mesh(new THREE.PlaneGeometry(0.2, 0.14), styl({ map: note, rough: 0.9, noise: 0 }), -0.1, 1.0, 0.325);
+  n.rotation.z = 0.06;
+  g.add(n);
+  for (const [x, y, c] of [[-0.2, 1.52, C.red], [0.05, 1.4, C.yellow], [-0.02, 0.62, 0x3f7d9f]] as const) g.add(mesh(sph(0.018, 8, 6), styl({ color: c, rough: 0.4 }), x, y, 0.33));
+  return { obj: g };
+}
+
+function corkboard(): PropBuild {
+  const g = new THREE.Group();
+  g.add(mesh(rbox(1.1, 0.75, 0.04, 0.01), MAT.wood(0x6b4a2e), 0, 0, 0));
+  g.add(mesh(rbox(1.02, 0.67, 0.02, 0.005), styl({ color: 0xb98a58, rough: 1, noise: 0.35, noiseScale: 6 }), 0, 0, 0.015));
+  const notes: [number, number, number, number, string][] = [
+    [-0.33, 0.14, 0.2, 0xfff3a0, 'SHIFT ROTA'],
+    [-0.05, 0.18, -0.12, 0xffffff, 'BOWLING THU'],
+    [0.28, 0.1, 0.08, 0xbfe3ff, 'LOST: 10mm'],
+    [-0.25, -0.17, -0.05, 0xffd1dc, 'NO MORE'],
+    [0.12, -0.16, 0.14, 0xffffff, 'SAFETY 1ST'],
+  ];
+  for (const [x, y, rz, c, text] of notes) {
+    const tex = textTexture([{ text, size: 26, color: '#2b2b2b', y: 60 }], 200, 150, '#' + c.toString(16).padStart(6, '0'));
+    const m = mesh(new THREE.PlaneGeometry(0.2, 0.15), styl({ map: tex, rough: 0.9, noise: 0 }), x, y, 0.03);
+    m.rotation.z = rz;
+    g.add(m);
+    g.add(mesh(sph(0.012, 6, 4), styl({ color: C.red, rough: 0.4 }), x, y + 0.06, 0.04));
+  }
+  return { obj: g };
+}
+
+function rug(p: PropDef): PropBuild {
+  const w = num(p, 'w', 1.8);
+  const d = num(p, 'd', 1.3);
+  const g = new THREE.Group();
+  g.add(mesh(rbox(w, 0.012, d, 0.004), MAT.fabric(0x6e3b3b), 0, 0.006, 0));
+  g.add(mesh(rbox(w - 0.2, 0.014, d - 0.2, 0.004), MAT.fabric(0xa35a3c), 0, 0.007, 0));
+  g.add(mesh(rbox(w - 0.5, 0.016, d - 0.5, 0.004), MAT.fabric(0xd8b46a), 0, 0.008, 0));
+  for (const o of g.children) o.receiveShadow = true;
+  return { obj: g };
+}
+
+function cot(): PropBuild {
+  const g = new THREE.Group();
+  const frame = MAT.wood(0x6b4a2e);
+  for (const [x, z] of [[-0.95, -0.38], [0.95, -0.38], [-0.95, 0.38], [0.95, 0.38]]) g.add(mesh(rbox(0.07, 0.42, 0.07, 0.01), frame, x, 0.21, z));
+  for (const z of [-0.38, 0.38]) g.add(mesh(rbox(2.0, 0.08, 0.06, 0.01), frame, 0, 0.36, z));
+  g.add(mesh(rbox(1.9, 0.12, 0.74, 0.05), MAT.fabric(0xd8d0bc), 0, 0.45, 0));
+  // wool blanket, turned down, and a flat pillow
+  g.add(mesh(rbox(1.3, 0.06, 0.8, 0.03), MAT.fabric(0x8a2f2a), 0.3, 0.52, 0));
+  for (let i = 0; i < 4; i++) g.add(mesh(rbox(0.04, 0.062, 0.81, 0.01), MAT.fabric(0x2a2a2a), -0.2 + i * 0.3, 0.522, 0));
+  g.add(mesh(rbox(0.4, 0.1, 0.55, 0.05), MAT.fabric(0xeae4d4), -0.72, 0.55, 0));
+  return { obj: g };
+}
+
 export const PROPS = {
+  cot,
+  crewTable,
+  fridge,
+  corkboard,
+  rug,
   lockers,
   bench,
   coffee,

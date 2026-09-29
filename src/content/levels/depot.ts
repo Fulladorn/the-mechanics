@@ -62,6 +62,9 @@ export const DEPOT = {
   crate: { x: 9, y: 2.6, z: -20 },
 };
 
+// Crew room partitions: a tired institutional sage.
+const CREW_WALL = 0xa7c2ae;
+
 export function makeDepot(): LevelDef {
   const t = Terrain.for(TERRAIN);
   const k = new Kit();
@@ -84,8 +87,8 @@ export function makeDepot(): LevelDef {
   k.prop('sign', { x: 0, y: 7.3, z: 9.25 }, Math.PI, { text: 'THE COMPANY · BAY 3', w: 7, h: 1.1 });
 
   // Locker room (NW) and storeroom (NE): partial-height rooms with ceilings.
-  k.wall({ x: -12, z: -4 }, { x: -6, z: -4 }, 0, 3, 0.2, [{ s: 2.3, e: 3.5, y0: 0, y1: 2.2 }], 'plaster', 0xe7dfcd);
-  k.wall({ x: -6, z: -9 }, { x: -6, z: -4 }, 0, 3, 0.2, [], 'plaster', 0xe7dfcd);
+  k.wall({ x: -12, z: -4 }, { x: -6, z: -4 }, 0, 3, 0.2, [{ s: 2.3, e: 3.5, y0: 0, y1: 2.2 }], 'plaster', CREW_WALL);
+  k.wall({ x: -6, z: -9 }, { x: -6, z: -4 }, 0, 3, 0.2, [], 'plaster', CREW_WALL);
   k.prop('slab', { x: -9, y: 3.0, z: -6.5 }, 0, { w: 6.2, d: 5.2, mat: 'ceiling', thick: 0.12 });
   k.wall({ x: 6, z: -4 }, { x: 12, z: -4 }, 0, 3, 0.2, [{ s: 2.5, e: 3.9, y0: 0, y1: 2.2 }], 'plaster', 0xd6cdb9);
   k.wall({ x: 6, z: -9 }, { x: 6, z: -4 }, 0, 3, 0.2, [], 'plaster', 0xd6cdb9);
@@ -101,7 +104,12 @@ export function makeDepot(): LevelDef {
   k.prop('clock', DEPOT.clock, -Math.PI / 2);
   k.prop('poster', { x: -11.83, y: 1.7, z: -5.6 }, Math.PI / 2, { art: 'safety' });
   k.prop('poster', { x: -6.13, y: 1.75, z: -7.4 }, -Math.PI / 2, { art: 'hands' });
-  k.prop('lamp', { x: -9, y: 2.92, z: -6.5 }, 0, { color: 0xffe2b8, power: 2.6, range: 8 });
+  k.prop('lamp', { x: -9, y: 2.92, z: -6.5 }, 0, { color: 0xffd9a8, power: 3.4, range: 9 });
+  // the break corner: somebody's lunch, somebody's newspaper
+  k.prop('rug', { x: -7.55, y: 0.02, z: -6.95 }, 0, { w: 1.9, d: 1.5 });
+  furnish(k, 'crewTable', -7.55, 0, -6.95, 0);
+  furnish(k, 'fridge', -11.5, 0, -7.45, Math.PI / 2);
+  k.prop('corkboard', { x: -10.9, y: 1.65, z: -4.12 }, Math.PI);
 
   // --- storeroom (dark: the flashlight lesson) ----------------------------------------------------
   furnish(k, 'tireRack', 11.4, 0, -6.4, -Math.PI / 2);

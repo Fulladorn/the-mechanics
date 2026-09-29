@@ -71,7 +71,7 @@ export function makeRidge(): LevelDef {
     e: [win(2.6, 4.4)],
   }, 'logs', 0x9a6a44);
   k.prop('roof', { x: R.x, y: ry + 3, z: R.z }, Math.PI / 2, { w: 8.2, d: 11.2, rise: 1.8, color: 0x3f5b3a });
-  k.prop('slab', { x: R.x, y: ry + 0.02, z: R.z }, 0, { w: 9.6, d: 6.6, mat: 'planks' });
+  k.prop('slab', { x: R.x, y: ry + 0.02, z: R.z }, 0, { w: 9.9, d: 6.9, mat: 'planks' });
   k.prop('porch', { x: rx0 - 1.2, y: ry, z: R.z - 0.3 }, Math.PI / 2, { w: 5, d: 2.2 });
   k.prop('sign', { x: rx0 - 0.2, y: ry + 3.5, z: R.z }, -Math.PI / 2, { text: 'KESTREL RIDGE · RANGER STATION', w: 5, h: 0.7, style: 'wood' });
   furnish(k, 'workbench', R.x + 3.4, ry, rz0 + 0.55, 0);
@@ -81,6 +81,11 @@ export function makeRidge(): LevelDef {
   k.prop('lamp', { x: R.x, y: ry + 2.9, z: R.z }, 0, { color: 0xffd9a8, power: 1.6, range: 8 });
   furnish(k, 'shelf', rx1 - 0.35, ry, R.z - 1.5, -Math.PI / 2, { fill: 'supplies' });
   k.prop('woodStove', { x: R.x - 3.8, y: ry, z: rz1 - 0.7 }, 0);
+  // lived in: a cot, a table by the stove, rafters overhead
+  furnish(k, 'cot', R.x + 2.3, ry, rz1 - 0.62, 0);
+  k.prop('rug', { x: R.x - 0.4, y: ry + 0.03, z: R.z + 1.5 }, 0, { w: 2.4, d: 1.7 });
+  furnish(k, 'crewTable', R.x - 0.4, ry, R.z + 1.5, 0.1);
+  k.prop('trusses', { x: R.x, y: ry + 3, z: R.z }, Math.PI / 2, { w: 7.2, d: 10, rise: 1.8, n: 2, wood: true });
   k.prop('flagPole', at(rx0 - 4, R.z + 5), 0);
   k.prop('woodpile', at(rx1 + 1.2, R.z + 2), Math.PI / 2);
   k.block(rx1 + 1.2, ry, R.z + 2, 0.9, 1.1, 2.4, 0, 'wood');

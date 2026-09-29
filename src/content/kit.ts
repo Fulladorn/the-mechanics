@@ -102,6 +102,9 @@ export class Kit {
 
 /** Footprints (w, h, d) of furniture props, used for their colliders. */
 export const FOOT: Record<string, [number, number, number]> = {
+  crewTable: [1.0, 0.76, 0.7],
+  cot: [2.0, 0.55, 0.85],
+  fridge: [0.7, 1.74, 0.64],
   lockers: [2.4, 2.0, 0.55],
   workbench: [2.6, 0.95, 0.8],
   tireRack: [2.2, 1.9, 0.7],

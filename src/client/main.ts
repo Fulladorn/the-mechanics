@@ -333,6 +333,7 @@ function installDebug(): void {
       if (!w) return;
       (w as unknown as { enterVehicle(v: unknown): void }).enterVehicle(w.vehicle(key));
     },
+    audio: () => audio.meter(),
     stats: () => {
       const r = game?.view.renderer.info;
       return r ? { draws: r.render.calls, tris: r.render.triangles, geos: r.memory.geometries, tex: r.memory.textures } : null;

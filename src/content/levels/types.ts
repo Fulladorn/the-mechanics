@@ -1,214 +1,167 @@
 import type { Vec3 } from '../../shared/math';
-import type { Box } from '../../sim/collision';
 import type { TerrainDef } from '../../sim/terrain';
 import type { HazardDef } from '../../sim/hazards';
-import type { ItemKind } from '../../shared/types';
-import type { PuzzleKind, Socket } from '../../sim/vehicle';
+import type { ItemSpawn } from '../../sim/items';
+import type { BoltState, MachineDef } from '../../sim/machine';
+import type { StaticShape } from '../../sim/physics';
+import type { VehicleDef } from '../../sim/vehicle';
+import type { World } from '../../sim/world';
 
-// The data a mission is made of. Everything the sim needs to run a level lives
-// here so World stays generic and levels stay pure data.
+// What a mission is made of. The sim reads the gameplay parts (statics,
+// items, machines, stations, beats); the client reads the same file for the
+// look (props, scatter, sky). Levels are TypeScript, so a beat can say
+// "done when the battery is in" as a function instead of a mini-language.
 
-// Tags let the renderer pick materials/procedural textures per structure.
-export type SolidTag =
-  | 'floor'
-  | 'wall'
-  | 'divider'
-  | 'crate'
-  | 'cabinet'
-  | 'pallet'
-  | 'terminal'
-  | 'door'
-  | 'rock'
-  | 'cabin'
-  | 'cabinRoof'
-  | 'guardrail'
-  | 'invisible';
-
-export interface Solid {
-  box: Box;
-  color: number;
-  tag: SolidTag;
-  hidden?: boolean; // collision-only (not rendered) — e.g. the open doorway
-}
-
-// Render-only decoration. Never enters collision, so the sim/tests are untouched.
-export type PropKind =
-  | 'tire'
-  | 'barrel'
-  | 'toolbox'
-  | 'jackstand'
-  | 'hoist'
-  | 'shelf'
-  | 'toolwall'
-  | 'poster'
-  | 'posterSymbol'
-  | 'pipe'
-  | 'ceilingLight'
-  | 'parkingLine'
-  | 'cone'
-  | 'window'
-  | 'fan'
-  | 'hangLamp'
-  | 'weldBot'
-  | 'toolchest'
-  | 'lockers'
-  | 'compressor'
-  | 'workbench'
-  | 'cables'
-  | 'sign'
-  | 'banner'
-  | 'gauge'
-  | 'fireext'
-  | 'jerrycan'
-  | 'crateStack'
-  | 'oilStain'
-  | 'tireMark'
-  | 'van'
-  | 'fence'
-  | 'yardLight'
-  | 'silhouette'
-  | 'tree'
-  | 'powerpole'
-  | 'cloud'
-  | 'bird'
-  | 'grass'
-  | 'roadline'
-  | 'lift'
-  | 'paintStation'
-  // --- mountain kit ---
-  | 'pine'
-  | 'boulder'
-  | 'rockSpire'
-  | 'guardrail'
-  | 'campfire'
-  | 'signpost'
-  | 'cabinDeco'
-  | 'snowPatch'
-  | 'shrub'
-  | 'caveMouth'
-  | 'winchAnchor'
-  | 'markerFlag'
-  | 'wreck';
-
-export interface Prop {
-  kind: PropKind;
-  pos: Vec3;
-  rot?: number;
-  scale?: number;
+/** A collider, optionally rendered as a plain block (e.g. a crate). */
+export interface StaticDef extends StaticShape {
+  /** Render as this material; omit for collision-only (buildings draw themselves). */
+  render?: string;
   color?: number;
 }
 
-export interface Exterior {
-  skyTop: string;
-  skyHorizon: string;
-  ground: number;
-  fogColor: number;
-  fogNear: number;
-  fogFar: number;
-}
-
-/** Anything you can pick up: tools, consumables and vehicle parts alike. */
-export interface ItemSpawn {
-  kind: ItemKind;
+/** Render-only dressing, built by the client kit. */
+export interface PropDef {
+  kind: string;
   pos: Vec3;
-  /** For part items: which PartVariant this pickup installs. */
-  variantId?: string;
-  /** Hidden until an objective completes (e.g. the cave reward). */
-  lockedUntil?: string;
+  yaw?: number;
+  scale?: number;
+  /** Free-form knobs for the builder (colour, length, variant...). */
+  p?: Record<string, number | string | boolean>;
 }
 
-export type StationKind =
-  | 'paint' // cycle the body colour
-  | 'lore' // the sealed crate / buried log — opens the fuse-grid puzzle
-  | 'clockOut' // finish the mission from a terminal
-  | 'chock' // stabilise a rolling vehicle
-  | 'refuel'; // top up from a fuel drum
+export interface MachinePlacement {
+  key: string;
+  def: MachineDef;
+  pos: Vec3;
+  yaw: number;
+  /** Drivable? Then this is its physics. */
+  vehicle?: VehicleDef;
+  /** Client model to draw ('betsy', 'ridgeback', 'atv', 'loggingTruck', ...). */
+  model: string;
+  paint?: number;
+  /** What's already fitted, and in what state. */
+  mounts?: Record<string, ItemSpawn & { bolts?: BoltState }>;
+  /** Terminals that start unclipped. */
+  terminalsOff?: string[];
+  /** Pocketed key needed to drive (tag). */
+  needsKey?: string;
+  /** Kept fixed while this returns true (chocked, on the lift...). */
+  pin?: (w: World) => boolean;
+}
 
-/** A fixed point of interaction that isn't an item or a vehicle socket. */
-export interface Station {
+export interface StationDef {
   id: string;
-  kind: StationKind;
   pos: Vec3;
-  label: string;
-  /** Objective marked done when this station is used. */
-  completes?: string;
-  /** Only offered once this objective is complete. */
-  requires?: string;
+  r: number;
+  label: string | ((w: World) => string);
+  verb: 'tap' | 'hold';
+  time?: number;
+  priority?: number;
+  /** true = usable, string = shown but disabled (reason), false = hidden. */
+  when?: (w: World) => true | string | false;
+  run: (w: World) => void;
+  /** What to highlight: a prop id. */
+  target?: string;
 }
 
-export interface ObjectiveDef {
+export interface DoorDef {
+  id: string;
+  /** Hinge-side bottom corner. */
+  hinge: Vec3;
+  /** Door width along its local +X (after yaw). */
+  width: number;
+  height: number;
+  yaw: number;
+  /** Pocketed key tag needed to open. */
+  locked?: string;
+  open?: boolean;
+  /** Label for the prompt ("front door", "shed"...). */
+  label?: string;
+  /** Big doors (roll-up) open by script only. */
+  scripted?: boolean;
+}
+
+export interface BeatDef {
+  id: string;
+  /** Objective card text. */
+  text: string | ((w: World) => string);
+  /** Smaller line under it. */
+  detail?: string | ((w: World) => string | null);
+  /** Waypoint; null hides it. */
+  marker?: (w: World) => Vec3 | null;
+  start?: (w: World) => void;
+  done: (w: World) => boolean;
+  finish?: (w: World) => void;
+  /** Dispatch nudges after N seconds on this beat. */
+  hints?: [number, string][];
+  checkpoint?: boolean;
+  /** Time of day to ease toward during this beat (hours). */
+  hour?: number;
+}
+
+export interface SideDef {
   id: string;
   text: string;
-  /** Shown in the HUD as the current goal marker. */
-  marker?: Vec3;
-  /** Optional objectives don't gate mission completion. */
-  optional?: boolean;
+  done: (w: World) => boolean;
+  /** Only listed once discovered. */
+  visible?: (w: World) => boolean;
 }
 
-/** Dispatch VO for a mission, keyed by beat. */
-export interface NarrativeScript {
-  intro: string;
-  outro: string;
-  lore: string;
-  /** Keyed by objective id. */
-  objectives: Record<string, string>;
-  /** Situational barks. */
-  cold?: string;
-  wolf?: string;
-  lowIntegrity?: string;
-  fail?: string;
+export interface TriggerDef {
+  id: string;
+  pos: Vec3;
+  r: number;
+  /** Extra condition. */
+  when?: (w: World) => boolean;
+  run: (w: World) => void;
+  /** Also fires while driving. */
+  vehicle?: boolean;
 }
 
-/** A vehicle system that starts fitted but faulty. */
-export interface BrokenSystem {
-  socketId: string;
-  puzzle: PuzzleKind;
+export interface LoreDef {
+  id: string;
+  title: string;
+  body: string;
+}
+
+export interface WolfSpawn {
+  pos: Vec3;
+  /** Only wakes once this flag is set. */
+  after?: string;
 }
 
 export interface LevelDef {
   id: string;
-  /** Shown on the loading card and the level select. */
   title: string;
   subtitle: string;
-  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
-  /** Key into SKY_PRESETS — drives sun angle, colour, fog and the IBL probe. */
-  skyPreset?: string;
-  /** When present the ground is a heightfield rather than a flat plane. */
-  terrain?: TerrainDef;
-
-  solids: Solid[];
-  props: Prop[];
-  exterior: Exterior;
-
-  spawn: Vec3;
-  spawnYaw: number;
-
-  /** Sockets for this mission's vehicle; omitted = the Garage build chassis. */
-  vehicleSockets?: Socket[];
-  vehicleStart: Vec3;
-  vehicleYaw: number;
-  vehicleColor?: number;
-  /** The vehicle creeps forward until `chock` is used (the cliff-edge opener). */
-  creep?: { speed: number; failAfter: number };
-
+  env: 'depot' | 'mountain';
+  terrain: TerrainDef;
+  /** Starting time of day in hours (e.g. 9.5 = 09:30). */
+  hour: number;
+  statics: StaticDef[];
+  props: PropDef[];
   items: ItemSpawn[];
-  stations: Station[];
-
-  /** Garage-only: the bunny-hop speed gate. */
-  gate?: Box;
-  garageDoor?: { center: Vec3; width: number; height: number };
-  /** Garage-only: the drive-the-loop checkpoints. */
-  checkpoints?: Vec3[];
-  /** Mission-only: drive here to extract. */
-  exfil?: { pos: Vec3; radius: number };
-
-  objectives: ObjectiveDef[];
+  machines: MachinePlacement[];
+  stations: StationDef[];
+  doors?: DoorDef[];
+  wolves?: WolfSpawn[];
+  spawn: { pos: Vec3; yaw: number };
+  beats: BeatDef[];
+  side?: SideDef[];
+  triggers?: TriggerDef[];
   hazards?: HazardDef;
-  /** Fires, cabins, the van — anywhere you can warm up. */
+  /** Heat sources for the cold meter. */
   warmth?: Vec3[];
-  /** Wolf spawn points. */
-  wolves?: Vec3[];
-
-  puzzleSeed: number;
-  narrative: NarrativeScript;
+  /** A vehicle below this height is gone (over the cliff). */
+  lostY?: number;
+  lore?: LoreDef[];
+  /** Par time in seconds, for grading. */
+  par: number;
+  /** No fail states (the tutorial). */
+  safe?: boolean;
+  /** Intro/outro cinematic ids the client knows how to play. */
+  intro?: string;
+  outro?: string;
+  /** First line from Dispatch. */
+  briefing: string;
 }

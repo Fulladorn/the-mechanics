@@ -15,6 +15,9 @@
     "playtest": "node tools/playtest.mjs"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.21.0",
+    "@fontsource/barlow-condensed": "^5.3.0",
+    "@fontsource/inter": "^5.3.0",
     "n8ao": "^1.10.2",
     "postprocessing": "^6.39.1",
     "three": "^0.169.0"

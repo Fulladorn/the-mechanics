@@ -18,10 +18,15 @@ const REBINDABLE: Action[] = [
   'crouch',
   'sprint',
   'interact',
-  'drop',
-  'attack',
-  'block',
   'use',
+  'drop',
+  'block',
+  'flashlight',
+  'jobsheet',
+  'camera',
+  'lights',
+  'horn',
+  'unflip',
   'pause',
 ];
 

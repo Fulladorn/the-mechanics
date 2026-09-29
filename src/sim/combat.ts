@@ -76,7 +76,7 @@ export function makeWolf(id: number, pos: Vec3, seed: number): Wolf {
 }
 
 export interface CombatEvent {
-  t: 'wolfTelegraph' | 'wolfLunge' | 'wolfHit' | 'wolfHurt' | 'wolfDied' | 'wolfNotice';
+  t: 'wolfTelegraph' | 'wolfLunge' | 'wolfHit' | 'wolfHurt' | 'wolfDied' | 'wolfNotice' | 'wolfFlee';
   id: number;
   pos: Vec3;
   damage?: number;
@@ -88,7 +88,12 @@ export interface WolfTarget {
   blocking: boolean;
   /** Downed players are ignored. */
   downed: boolean;
+  /** Burning flares: wolves won't come near them. */
+  fear?: Vec3[];
 }
+
+/** Distance at which a lit flare sends a wolf running. */
+export const FLARE_FEAR = 13;
 
 /**
  * Advance one wolf. Returns the damage it dealt to the target this step (the
@@ -108,6 +113,15 @@ export function stepWolf(
   const homeDist = dist2D(w.pos, w.home);
   w.timer -= dt;
   let damage = 0;
+
+  // Fire beats teeth: anywhere near a burning flare, they break off.
+  const afraid = (target.fear ?? []).some((f) => dist2D(f, w.pos) < FLARE_FEAR);
+  if (afraid && w.state !== 'flee') {
+    w.state = 'flee';
+    w.timer = 5;
+    w.staggered = false;
+    events.push({ t: 'wolfFlee', id: w.id, pos: { ...w.pos } });
+  }
 
   const faceTarget = () => {
     const d = vnorm({ x: target.pos.x - w.pos.x, y: 0, z: target.pos.z - w.pos.z });
@@ -202,6 +216,15 @@ export function stepWolf(
     }
 
     case 'flee': {
+      if (afraid) {
+        // Run directly away from the nearest flare.
+        const f = (target.fear ?? []).reduce((a, b) => (dist2D(a, w.pos) < dist2D(b, w.pos) ? a : b));
+        const away = vnorm({ x: w.pos.x - f.x, y: 0, z: w.pos.z - f.z });
+        moveToward({ x: w.pos.x + away.x * 10, y: 0, z: w.pos.z + away.z * 10 }, def.moveSpeed * 1.1);
+        w.yaw = Math.atan2(-away.x, -away.z);
+        if (w.timer < 1) w.timer = 1;
+        break;
+      }
       moveToward(w.home, def.moveSpeed * 0.8);
       if (w.timer <= 0 || homeDist < 3) {
         w.state = 'idle';

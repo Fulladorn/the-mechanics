@@ -9,6 +9,8 @@ export interface Settings {
     postfx: boolean;
     shadows: boolean;
     brightness: number; // tone-mapping exposure multiplier
+    /** Vehicle camera: third-person chase or first-person cockpit. */
+    vehicleCam: 'chase' | 'cockpit';
   };
   audio: {
     master: number;
@@ -27,11 +29,15 @@ export interface Settings {
     screenshake: boolean;
     subtitles: boolean;
     colorblind: boolean;
+    /** Wider torque band on bolts. */
+    torqueAssist: boolean;
+    /** Speak Dispatch's lines with the browser voice instead of radio chatter. */
+    tts: boolean;
   };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  video: { fov: 78, quality: 'high', postfx: true, shadows: true, brightness: 1.0 },
+  video: { fov: 76, quality: 'med', postfx: true, shadows: true, brightness: 1.0, vehicleCam: 'chase' },
   audio: { master: 0.9, music: 0.45, sfx: 0.9, voice: 1.0 },
   controls: { sensitivity: 0.0022, invertY: false, binds: { ...DEFAULT_BINDS } },
   accessibility: {
@@ -40,10 +46,12 @@ export const DEFAULT_SETTINGS: Settings = {
     screenshake: true,
     subtitles: true,
     colorblind: false,
+    torqueAssist: false,
+    tts: false,
   },
 };
 
-const KEY = 'mech.settings.v1';
+const KEY = 'mech.settings.v2';
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);

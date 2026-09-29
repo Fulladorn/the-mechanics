@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { PropDef } from '../../../content/levels/types';
 import type { Opening } from '../../../content/kit';
 import { MAT, styl } from '../stylized';
-import { mesh, rbox, textTexture } from '../shapes';
+import { cyl, mesh, rbox, textTexture } from '../shapes';
 import type { PropBuild } from './registry';
 
 // Architecture: walls (with real holes for doors and windows so sunlight
@@ -24,6 +24,7 @@ function wall(p: PropDef): PropBuild {
   const trim = styl({ color: 0x3d5a73, rough: 0.6 });
   const frame = styl({ color: 0x2f3440, rough: 0.55, metal: 0.3 });
   const siding = style === 'siding';
+  const logMat = MAT.wood(color);
 
   const panel = (s: number, e: number, y0: number, y1: number) => {
     if (e - s < 0.01 || y1 - y0 < 0.01) return;
@@ -37,6 +38,27 @@ function wall(p: PropDef): PropBuild {
         if (y < 0.05) continue;
         for (const sd of [-1, 1]) {
           const b = mesh(rbox(w, 0.035, 0.02, 0.008), base, s + w / 2, y, sd * (t / 2 + 0.008));
+          b.castShadow = false;
+          g.add(b);
+        }
+      }
+    }
+    if (style === 'logs') {
+      // stacked round logs, both faces, with a darker chink line between
+      for (let y = y0 + 0.14; y < y1 - 0.05; y += 0.28) {
+        for (const sd of [-1, 1]) {
+          const lg = mesh(cyl(0.15, 0.15, w, 10), logMat, s + w / 2, y, sd * (t / 2 - 0.04));
+          lg.rotation.z = Math.PI / 2;
+          lg.scale.set(1, 1, 0.55);
+          g.add(lg);
+        }
+      }
+      return;
+    }
+    if (style === 'boards') {
+      for (let x = s + 0.18; x < e - 0.05; x += 0.36) {
+        for (const sd of [-1, 1]) {
+          const b = mesh(rbox(0.07, hh, 0.025, 0.008), base, x, y0 + hh / 2, sd * (t / 2 + 0.012));
           b.castShadow = false;
           g.add(b);
         }
@@ -196,11 +218,26 @@ function slab(p: PropDef): PropBuild {
   const d = num(p, 'd');
   const th = num(p, 'thick', 0.03);
   const kind = str(p, 'mat', 'shopFloor');
-  const mat = kind === 'ceiling' ? styl({ color: 0xe8e2d4, rough: 0.95, noise: 0.05 }) : styl({ color: 0xa6a298, rough: 0.9, noise: 0.22, noiseScale: 1.4, rim: 0.05 });
+  const mat =
+    kind === 'ceiling'
+      ? styl({ color: 0xe8e2d4, rough: 0.95, noise: 0.05 })
+      : kind === 'planks'
+        ? MAT.wood(0x9a7248)
+        : kind === 'dirtFloor'
+          ? styl({ color: 0x7d6a55, rough: 1, noise: 0.3, noiseScale: 0.8 })
+          : styl({ color: 0xa6a298, rough: 0.9, noise: 0.22, noiseScale: 1.4, rim: 0.05 });
   const m = mesh(rbox(w, th, d, 0.005), mat, 0, 0, 0);
   m.castShadow = kind === 'ceiling';
   const g = new THREE.Group();
   g.add(m);
+  if (kind === 'planks') {
+    const seam = styl({ color: 0x5a4028, rough: 0.9 });
+    for (let x = -w / 2 + 0.2; x < w / 2; x += 0.2) {
+      const j = mesh(rbox(0.012, 0.004, d, 0.001), seam, x, th / 2 + 0.002, 0);
+      j.castShadow = false;
+      g.add(j);
+    }
+  }
   if (kind === 'shopFloor') {
     // expansion joints
     const joint = styl({ color: 0x7a766e, rough: 0.9 });
@@ -253,7 +290,29 @@ export function signBoard(text: string, w: number, h: number, bg = '#1d2a3a', fg
 }
 
 function sign(p: PropDef): PropBuild {
-  return { obj: signBoard(str(p, 'text', 'SIGN'), num(p, 'w', 4), num(p, 'h', 1)) };
+  const w = num(p, 'w', 4);
+  const h = num(p, 'h', 1);
+  const wood = str(p, 'style', '') === 'wood';
+  const board = wood ? woodSign(str(p, 'text', 'SIGN'), w, h) : signBoard(str(p, 'text', 'SIGN'), w, h);
+  if (!p.p?.post) return { obj: board };
+  // on two posts, board top at the prop's y
+  const g = new THREE.Group();
+  board.position.y = -h / 2;
+  g.add(board);
+  const postMat = wood ? MAT.wood(0x6b4a2e) : styl({ color: 0x2b2f38, rough: 0.6, metal: 0.3 });
+  for (const sx of [-1, 1]) g.add(mesh(rbox(0.12, 3, 0.12, 0.03), postMat, sx * (w / 2 - 0.3), -1.5, -0.08));
+  return { obj: g };
+}
+
+/** A routed timber sign: cream letters on stained boards. */
+export function woodSign(text: string, w: number, h: number): THREE.Group {
+  const g = new THREE.Group();
+  const tex = textTexture([{ text, size: 120, color: '#f3e9cf', y: Math.round((1024 * h) / w / 2) + 40, font: '700' }], 1024, Math.round((1024 * h) / w), '#5a3d26');
+  const face = mesh(new THREE.PlaneGeometry(w, h), styl({ map: tex, rough: 0.85, noise: 0.2, noiseScale: 0.5 }));
+  face.position.z = 0.051;
+  g.add(face);
+  g.add(mesh(rbox(w + 0.14, h + 0.14, 0.1, 0.03), MAT.wood(0x6b4a2e)));
+  return g;
 }
 
 function roomSign(p: PropDef): PropBuild {

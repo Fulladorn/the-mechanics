@@ -989,6 +989,12 @@ export class World {
     this.flares = this.flares.filter((f) => f.ttl > 0);
   }
 
+  /** Has this wolf come out yet (its `after` flag is set)? */
+  wolfAwake(id: number): boolean {
+    const after = this.wolfAfter.get(id);
+    return !after || this.flags.has(after);
+  }
+
   private stepWolves(intent: Intent, dt: number): void {
     if (!this.wolves.length) return;
     const p = this.player;

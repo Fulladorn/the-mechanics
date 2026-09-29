@@ -12,6 +12,8 @@ import { Highlight } from './highlight';
 import { Viewmodel } from './viewmodel';
 import { Post } from './post';
 import { Particles, PARTICLE_SCALE } from './particles';
+import { Water } from './water';
+import { WolfPack } from './wolves';
 import { MachineView } from './machineView';
 import { itemModel } from './itemModels';
 import { cyl, mesh, rbox } from './shapes';
@@ -68,6 +70,8 @@ export class GameView {
   private shade = 0;
   private tmpV = new THREE.Vector3();
   private tmpV2 = new THREE.Vector2();
+  private water?: Water;
+  private wolves?: WolfPack;
   private ambient = 1;
 
   constructor(
@@ -122,6 +126,14 @@ export class GameView {
     this.scene.add(this.grass.group);
 
     if (level.nature?.length) this.scene.add(new Nature(level.nature).group);
+    if (level.terrain.waterLevel !== undefined) {
+      this.water = new Water(world.terrain, level.terrain.waterLevel);
+      this.scene.add(this.water.group);
+    }
+    if (world.wolves.length) {
+      this.wolves = new WolfPack(world);
+      this.scene.add(this.wolves.group);
+    }
 
     // Static colliders that draw themselves as blocks.
     for (const s of level.statics) {
@@ -267,6 +279,8 @@ export class GameView {
     this.post.setExposure(this.settings.video.brightness * this.sky.exposure * (1 + (1 - this.ambient) * 0.22));
     for (const p of this.props) p.update?.(dt, this.clock, w);
     this.syncFlares(dt);
+    this.water?.update(this.clock);
+    this.wolves?.update(dt, this.sky.night);
 
     // --- camera -----------------------------------------------------------------
     const p = w.player;

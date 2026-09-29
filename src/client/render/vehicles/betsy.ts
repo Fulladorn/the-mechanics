@@ -14,7 +14,15 @@ const FRONT_ARCH = -1.42;
 const REAR_ARCH = 1.36;
 const ARCH_R = 0.5;
 
-export function buildBetsy(paintHex = 0x5aa6c8): VehicleModel {
+export interface BetsyLivery {
+  door: [string, string];
+  tailgate: string;
+}
+
+const COMPANY: BetsyLivery = { door: ['THE COMPANY', 'FLEET · 07 · TRAINING'], tailgate: 'BETSY' };
+export const RANGER: BetsyLivery = { door: ['PARK SERVICE', 'KESTREL RIDGE'], tailgate: 'RANGER' };
+
+export function buildBetsy(paintHex = 0x5aa6c8, livery: BetsyLivery = COMPANY): VehicleModel {
   const root = new THREE.Group();
   root.name = 'betsy';
   const body = carPaint(paintHex);
@@ -206,8 +214,8 @@ export function buildBetsy(paintHex = 0x5aa6c8): VehicleModel {
   // door seams, handles, company decal
   const decal = textTexture(
     [
-      { text: 'THE COMPANY', size: 64, color: '#ff7a2f', y: 96 },
-      { text: 'FLEET · 07 · TRAINING', size: 34, color: '#f3e9cf', y: 160 },
+      { text: livery.door[0], size: 64, color: livery === COMPANY ? '#ff7a2f' : '#f3e9cf', y: 96 },
+      { text: livery.door[1], size: 34, color: '#f3e9cf', y: 160 },
     ],
     512,
     256,
@@ -271,7 +279,7 @@ export function buildBetsy(paintHex = 0x5aa6c8): VehicleModel {
   const tailgate = mesh(rbox(1.56, 0.5, 0.07, 0.025), body);
   tailgate.position.set(0, 0.1, 2.3);
   add(tailgate);
-  const tgText = textTexture([{ text: 'BETSY', size: 110, color: '#f3e9cf', y: 128 }], 512, 256);
+  const tgText = textTexture([{ text: livery.tailgate, size: 110, color: '#f3e9cf', y: 128 }], 512, 256);
   const tg = mesh(new THREE.PlaneGeometry(0.9, 0.45), styl({ map: tgText, transparent: true, rough: 0.5, noise: 0, polygonOffset: 2 }));
   tg.position.set(0, 0.12, 2.337);
   add(tg);

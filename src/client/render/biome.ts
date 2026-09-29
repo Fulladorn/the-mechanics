@@ -100,8 +100,15 @@ export class Biome {
     let grass = 1;
     let flowers = THREE.MathUtils.smoothstep(n1 * (1 - n2), 0.28, 0.45);
 
-    // Rock on steep ground.
-    const rockK = THREE.MathUtils.smoothstep(slope, 0.26, 0.42);
+    // Rock on steep ground — but not on road embankments, which are
+    // made ground (grassed-over fill), however steep.
+    const road = t.roadAt(x, z, 14);
+    let embank = 0;
+    if (road.road >= 0) {
+      const d = t.roads[road.road].def;
+      embank = 1 - THREE.MathUtils.smoothstep(road.dist, d.halfWidth + d.shoulder * 0.7, d.halfWidth + d.shoulder + 1.5);
+    }
+    const rockK = THREE.MathUtils.smoothstep(slope, 0.26, 0.42) * (1 - embank);
     if (rockK > 0) {
       C.b.setHex(p.rock).lerp(C.c.setHex(p.rockDark), n2 * 0.6);
       col.lerp(C.b, rockK);
@@ -117,7 +124,6 @@ export class Biome {
     }
 
     // Roads: packed surface with wheel ruts, dirt shoulders.
-    const road = t.roadAt(x, z, 14);
     if (road.road >= 0) {
       const def = t.roads[road.road].def;
       const hw = def.halfWidth;

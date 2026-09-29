@@ -41,7 +41,7 @@ export function makeRidge(): LevelDef {
   const carPos = { x: RIDGE.car.x, y: gy(RIDGE.car.x, RIDGE.car.z) + 1.05, z: RIDGE.car.z };
   const van = { x: RIDGE.van.x, z: RIDGE.van.z };
   const vy = gy(van.x, van.z);
-  k.prop('van', { x: van.x, y: vy + 1.35, z: van.z }, 0.05, { color: 0xf1ede2, stripe: 0xff7a2f, open: true });
+  k.prop('van', { x: van.x, y: vy, z: van.z }, 0.05, { color: 0xf1ede2, stripe: 0xff7a2f, open: true });
   k.block(van.x, vy, van.z, 2.0, 2.3, 4.8, 0.05, 'metal');
   k.prop('sign', { x: 11, y: oy + 2.2, z: -330 }, Math.PI / 2, { text: 'KESTREL RIDGE OVERLOOK · 2,114 m', w: 5.2, h: 0.8, post: true });
   furnish(k, 'bench', 29, oy, -330, -Math.PI / 2);
@@ -156,7 +156,7 @@ export function makeRidge(): LevelDef {
   }
   k.prop('dock', at(C.x + 30, C.z + 36, -0.2), -0.7, { len: 14 });
   k.prop('canoe', at(C.x + 22, C.z + 30, 0.1), 0.9);
-  k.prop('sign', at(C.x - 14, C.z - 8, 2), 0.6, { text: 'LAKESIDE CAMPGROUND', w: 4, h: 0.7, style: 'wood', post: true });
+  k.prop('sign', at(C.x - 14, C.z - 8, 2), -2.36, { text: 'LAKESIDE CAMPGROUND', w: 4, h: 0.7, style: 'wood', post: true });
 
   // --- fire lookout tower ----------------------------------------------------------------------
   const T = RIDGE.tower;
@@ -226,7 +226,7 @@ export function makeRidge(): LevelDef {
 
   // --- the Company's crashed van (lore) ------------------------------------------------------------
   const wreck = at(-66, 186);
-  k.prop('van', { x: wreck.x, y: wreck.y + 1.1, z: wreck.z }, 2.3, { color: 0xd9d3c4, stripe: 0xff7a2f, wrecked: true });
+  k.prop('van', { x: wreck.x, y: wreck.y + 1.0, z: wreck.z }, 2.3, { color: 0xd9d3c4, stripe: 0xff7a2f, wrecked: true });
   k.block(wreck.x, wreck.y, wreck.z, 2.0, 2.0, 4.8, 2.3, 'metal');
 
   // --- extraction lot ---------------------------------------------------------------------------
@@ -665,7 +665,7 @@ export function makeRidge(): LevelDef {
       {
         key: 'rangerPickup',
         def: RANGER_PICKUP,
-        model: 'betsy',
+        model: 'rangerPickup',
         pos: { x: pickup.x, y: py + 1.05, z: pickup.z },
         yaw: Math.PI / 2,
         paint: 0x4c6b3c,
@@ -798,7 +798,7 @@ export function makeRidge(): LevelDef {
       { id: 'shed', hinge: { x: sx1, y: sy, z: sz0 + 3 }, width: 8, height: 4.6, yaw: -Math.PI / 2, scripted: true, style: 'rollup' },
     ],
     wolves: wolfSpots,
-    spawn: { pos: { x: van.x - 1.8, y: vy, z: van.z + 1.5 }, yaw: 0.2 },
+    spawn: { pos: { x: van.x - 3.2, y: vy, z: van.z + 5.5 }, yaw: -0.25 },
     beats,
     side: [
       { id: 'winch', text: 'Fit the winch from the old mine', done: (w) => w.systemOk(M, 'winch'), visible: (w) => w.flag('map') },

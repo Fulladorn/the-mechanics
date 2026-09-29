@@ -46,6 +46,8 @@ export const RIDGE_TERRAIN: TerrainDef = {
     { kind: 'hill', x: 250, z: -380, r: 120, h: 48, sharp: 1.2 },
     // The drop: a gorge right behind the overlook.
     { kind: 'hill', x: 20, z: -455, r: 95, h: -95, sharp: 2 },
+    // The hillside the mine is driven into.
+    { kind: 'hill', x: -196, z: -236, r: 26, h: 14, sharp: 1.1 },
     // Knoll with the fire lookout.
     { kind: 'hill', x: 122, z: -122, r: 45, h: 16, sharp: 1.1 },
     // Lake basin.
@@ -60,7 +62,7 @@ export const RIDGE_TERRAIN: TerrainDef = {
   ],
   roads: [
     // The overlook pull-out: wide, and gently downhill toward the drop.
-    { id: 'overlook', surface: 'gravel', halfWidth: 7, shoulder: 6, smooth: 0, points: [[20, -358, 94.6], [20, -336, 96.1], [20, -314, 97.1]] },
+    { id: 'overlook', surface: 'gravel', halfWidth: 7, shoulder: 6, smooth: 0, points: [[20, -358, 88.3], [20, -336, 89.9], [20, -314, 91.6]] },
     {
       id: 'summit',
       surface: 'gravel',
@@ -68,10 +70,10 @@ export const RIDGE_TERRAIN: TerrainDef = {
       shoulder: 7,
       smooth: 3,
       points: [
-        [20, -352, 95.2], [20, -334, 96.2], [20, -316, 97], [18, -298, 95.4], [-8, -287, 92.2], [-52, -281, 88.4],
-        [-82, -268, 85.4], [-74, -251, 82.4], [-28, -240, 78.4], [22, -230, 75.2], [42, -215, 72.4],
-        [24, -200, 69.4], [-24, -191, 66.2], [-56, -178, 63.4], [-50, -160, 61.4], [-40, -140, 59.4],
-        [-26, -110, 55.6], [-8, -76, 50.6], [3, -46, 46], [5, -20, 42.5],
+        [20, -352, 88.8], [20, -334, 90.0], [20, -316, 91.6], [18, -298, 89.4], [-8, -287, 85.8], [-52, -281, 80.5],
+        [-82, -268, 77.2], [-74, -251, 75.0], [-28, -240, 70.8], [22, -230, 67.6], [42, -215, 65.0],
+        [24, -200, 62.2], [-24, -191, 60.0], [-56, -178, 59.6], [-50, -160, 59.6], [-40, -140, 59.4],
+        [-26, -110, 55.6], [-8, -76, 50.4], [3, -46, 45.2], [5, -20, 40.2],
       ],
     },
     {
@@ -79,7 +81,7 @@ export const RIDGE_TERRAIN: TerrainDef = {
       surface: 'gravel',
       halfWidth: 3.4,
       shoulder: 7,
-      points: [[5, -20, 42.5], [2, 18, 36.8], [-3, 55, 30.6], [0, 88, 25.6], [0, 114, 22.8]],
+      points: [[5, -20, 40.2], [2, 18, 34.2], [-3, 55, 28.4], [0, 88, 24.6], [0, 114, 22.8]],
     },
     {
       id: 'south2',
@@ -93,14 +95,14 @@ export const RIDGE_TERRAIN: TerrainDef = {
       surface: 'dirt',
       halfWidth: 3,
       shoulder: 6,
-      points: [[5, -20, 42.5], [-40, -30, 40.2], [-100, -36, 35.5], [-160, -32, 31.5], [-205, -26, 29.4], [-222, -22, 29.2]],
+      points: [[5, -20, 40.2], [-40, -30, 40.2], [-100, -36, 35.5], [-160, -32, 31.5], [-205, -26, 29.4], [-222, -22, 29.2]],
     },
     {
       id: 'camp',
       surface: 'dirt',
       halfWidth: 3,
       shoulder: 6,
-      points: [[5, -20, 42.5], [48, -8, 38.5], [100, 12, 31.5], [150, 34, 24.5], [178, 48, 21.6]],
+      points: [[5, -20, 40.2], [48, -8, 35.8], [100, 12, 31.5], [150, 34, 24.5], [178, 48, 21.6]],
     },
     {
       id: 'logging',
@@ -115,7 +117,7 @@ export const RIDGE_TERRAIN: TerrainDef = {
       surface: 'track',
       halfWidth: 2.4,
       shoulder: 5,
-      points: [[-82, -268, 85.4], [-110, -262, 84], [-140, -248, 81.5], [-156, -238, 80.5]],
+      points: [[-82, -268, 77.2], [-110, -262, 77.5], [-140, -248, 77.8], [-156, -238, 78]],
     },
   ],
   pads: [
@@ -123,7 +125,7 @@ export const RIDGE_TERRAIN: TerrainDef = {
     { x: -232, z: -18, radius: 30, blend: 14, y: 29.2 },
     { x: 186, z: 54, radius: 26, blend: 12, y: 21.6 },
     { x: 0, z: 312, radius: 24, blend: 14, y: 20.4 },
-    { x: -160, z: -236, radius: 12, blend: 8, y: 80.5 },
+    { x: -164, z: -236, radius: 12, blend: 5, y: 78 },
     { x: 122, z: -122, radius: 6, blend: 6 },
   ],
   waterLevel: 16,

@@ -114,6 +114,7 @@ export const FOOT: Record<string, [number, number, number]> = {
   toolChest: [1.0, 1.1, 0.55],
   bench: [1.8, 0.45, 0.4],
   coffee: [0.6, 1.0, 0.5],
+  picnicTable: [1.8, 0.8, 1.6],
   container: [6.0, 2.6, 2.4],
   van: [2.0, 2.3, 4.8],
   liftPost: [0.35, 3.2, 0.35],

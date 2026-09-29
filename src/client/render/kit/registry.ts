@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import type { PropDef } from '../../../content/levels/types';
 import type { World } from '../../../sim/world';
-import { buildBetsy } from '../vehicles/betsy';
+import { RANGER, buildBetsy } from '../vehicles/betsy';
+import { buildRidgeback } from '../vehicles/ridgeback';
+import { buildAtv, buildGenerator, buildLoggingTruck } from '../vehicles/donors';
+import { RIDGE_PROPS } from './ridgeProps';
 import type { VehicleModel } from '../vehicles/parts';
 import { BUILDING } from './building';
 import { PROPS as KIT_PROPS } from './props';
@@ -26,6 +29,7 @@ function ensure(): void {
   registered = true;
   registerProps(BUILDING as Record<string, PropBuilder>);
   registerProps(KIT_PROPS as Record<string, PropBuilder>);
+  registerProps(RIDGE_PROPS as Record<string, PropBuilder>);
 }
 
 export function registerProps(table: Record<string, PropBuilder>): void {
@@ -49,6 +53,16 @@ export function buildModel(model: string, paint?: number): { vehicle: VehicleMod
   switch (model) {
     case 'betsy':
       return { vehicle: buildBetsy(paint), art: null };
+    case 'rangerPickup':
+      return { vehicle: buildBetsy(paint, RANGER), art: null };
+    case 'ridgeback':
+      return { vehicle: buildRidgeback(paint), art: null };
+    case 'atv':
+      return { vehicle: buildAtv(paint), art: null };
+    case 'loggingTruck':
+      return { vehicle: null, art: buildLoggingTruck(paint) };
+    case 'generator':
+      return { vehicle: null, art: buildGenerator() };
     default:
       return { vehicle: null, art: null };
   }

@@ -180,11 +180,12 @@ function lamp(p: PropDef): PropBuild {
   light.position.y = -0.3;
   g.add(light);
   const base = light.intensity;
+  const gate = str(p, 'flag', '');
   return {
     obj: g,
-    update: (_dt, t) => {
-      if (!flicker) return;
-      const on = Math.sin(t * 13) + Math.sin(t * 7.3) > 1.2 ? 0.2 : 1;
+    update: (_dt, t, w) => {
+      const powered = !gate || w.flag(gate);
+      const on = !powered ? 0 : flicker && Math.sin(t * 13) + Math.sin(t * 7.3) > 1.2 ? 0.2 : 1;
       light.intensity = base * on;
       tube2.emissiveIntensity = 2.4 * on;
     },
@@ -449,9 +450,36 @@ function van(p: PropDef): PropBuild {
     hood.rotation.x = -0.9;
     g.add(hood);
   }
+  if (p.p?.open) {
+    // back doors swung wide, dark load space inside
+    g.add(mesh(rbox(1.8, 1.3, 0.02, 0.01), styl({ color: 0x1c1e22, rough: 0.9 }), 0, y0 + 1.0, 2.24));
+    for (const s of [-1, 1]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(s * 0.97, y0 + 1.0, 2.25);
+      pivot.rotation.y = s * 1.9;
+      pivot.add(mesh(rbox(0.94, 1.36, 0.05, 0.02), paint, -s * 0.47, 0, 0));
+      g.add(pivot);
+    }
+  } else {
+    g.add(mesh(rbox(1.9, 1.36, 0.04, 0.02), paint, 0, y0 + 1.0, 2.26));
+  }
+  if (p.p?.wrecked) {
+    // on its side in the ditch, glass gone, rust bloom
+    g.rotation.z = 1.45;
+    g.position.y = 0;
+    g.traverse((o) => {
+      if (o instanceof THREE.Mesh && o.material === glass) o.visible = false;
+    });
+    paint.color.multiply(new THREE.Color(0xa89c88));
+  }
   g.traverse((o) => {
     if (o instanceof THREE.Mesh) o.castShadow = true;
   });
+  if (p.p?.wrecked) {
+    const outer = new THREE.Group();
+    outer.add(g);
+    return { obj: outer };
+  }
   return { obj: g };
 }
 
@@ -655,15 +683,29 @@ function pallet(): PropBuild {
   return { obj: g };
 }
 
-function lampPost(): PropBuild {
+function lampPost(p: PropDef): PropBuild {
   const g = new THREE.Group();
   const m = paintMat(0x2b2f38);
   g.add(mesh(cyl(0.07, 0.1, 5.5, 10), m, 0, 2.75, 0));
   g.add(mesh(rbox(1.0, 0.08, 0.1, 0.03), m, 0.45, 5.4, 0));
   const head = mesh(rbox(0.5, 0.15, 0.3, 0.05), m, 0.9, 5.3, 0);
   g.add(head);
-  g.add(mesh(rbox(0.44, 0.02, 0.24, 0.01), MAT.glow(0xfff0c8, 0.6), 0.9, 5.22, 0));
-  return { obj: g };
+  const lens = MAT.glow(0xfff0c8, 0.6);
+  g.add(mesh(rbox(0.44, 0.02, 0.24, 0.01), lens, 0.9, 5.22, 0));
+  if (!p.p?.on) return { obj: g };
+  // a real sodium-ish floodlight that comes on at dusk
+  const light = new THREE.SpotLight(0xffe2b0, 0, 30, 0.9, 0.6, 1.2);
+  light.position.set(0.9, 5.1, 0);
+  light.target.position.set(3, 0, 0);
+  g.add(light, light.target);
+  return {
+    obj: g,
+    update: (_dt, _t, w) => {
+      const dusk = Math.min(1, Math.max(0, (w.hour - 19.4) / 0.8));
+      light.intensity = dusk * 40;
+      lens.emissiveIntensity = 0.6 + dusk * 3;
+    },
+  };
 }
 
 function flagPole(_p: PropDef): PropBuild {

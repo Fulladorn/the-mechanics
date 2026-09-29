@@ -35,7 +35,7 @@ export const BETSY_VEHICLE: VehicleDef = {
   grip: 2.4,
   engine: { force: 7200, brake: 260, topSpeed: 19, reverseSpeed: 6 },
   steer: { max: 0.55, atSpeed: 0.28, rate: 2.4 },
-  seat: { x: -0.36, y: 0.76, z: -0.25 },
+  seat: { x: -0.36, y: 0.86, z: -0.1 },
   exit: { x: -1.75, y: -0.5, z: -0.35 },
   door: { pos: { x: -0.95, y: 0.35, z: -0.35 }, r: 0.62 },
 };

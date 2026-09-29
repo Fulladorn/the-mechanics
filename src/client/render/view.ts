@@ -11,7 +11,7 @@ import { CameraRig } from './cameraRig';
 import { Highlight } from './highlight';
 import { Viewmodel } from './viewmodel';
 import { Post } from './post';
-import { Particles } from './particles';
+import { Particles, PARTICLE_SCALE } from './particles';
 import { MachineView } from './machineView';
 import { itemModel } from './itemModels';
 import { cyl, mesh, rbox } from './shapes';
@@ -67,6 +67,7 @@ export class GameView {
   private shadeCheck = 0;
   private shade = 0;
   private tmpV = new THREE.Vector3();
+  private tmpV2 = new THREE.Vector2();
   private ambient = 1;
 
   constructor(
@@ -351,6 +352,7 @@ export class GameView {
       }
     }
 
+    PARTICLE_SCALE.value = this.renderer.getDrawingBufferSize(this.tmpV2).y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
     this.particles.update(dt);
     this.post.render(dt, this.scene, this.camera);
     this.renderHands();

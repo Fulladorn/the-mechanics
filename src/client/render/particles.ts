@@ -25,6 +25,9 @@ interface EmitOpts {
  * pool for sparks/glints and an alpha-blended pool for smoke and dust —
  * previously everything was additive, so smoke was impossible.
  */
+/** Pixels per metre at 1 m depth; set from the camera each frame. */
+export const PARTICLE_SCALE = { value: 460 };
+
 class Pool {
   private pos: Float32Array;
   private vel: Float32Array;
@@ -68,17 +71,22 @@ class Pool {
     this.geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
 
     const mat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: map }, uSoft: { value: softness } },
+      uniforms: { map: { value: map }, uSoft: { value: softness }, uScale: PARTICLE_SCALE },
       transparent: true,
       depthWrite: false,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       vertexShader: `
         attribute float aSize; attribute float aAlpha; attribute float aRot; attribute vec3 aColor;
+        uniform float uScale;
         varying float vAlpha; varying float vRot; varying vec3 vColor;
         void main(){
-          vAlpha = aAlpha; vRot = aRot; vColor = aColor;
+          vColor = aColor; vRot = aRot;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = aSize * (320.0 / max(-mv.z, 0.1));
+          float d = max(-mv.z, 0.05);
+          // aSize is in centimetres-ish (x0.02 m); fade sprites that get right
+          // up against the lens so they never blanket the screen.
+          gl_PointSize = min(aSize * 0.02 * uScale / d, 512.0);
+          vAlpha = aAlpha * smoothstep(0.35, 1.6, d);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
@@ -208,7 +216,7 @@ export class Particles {
     this.emit(p, { count: 34, speed: 5.2, spread: 2.1, up: 2.2, gravity: 5, size: 19, ttl: 0.85, color, spin: 5 });
   }
   exhaust(p: Vec3, strength = 0.5): void {
-    this.emitSmoke(p, { count: 1, speed: 0.3, spread: 0.25, up: 0.35, gravity: -0.35, size: 14 + strength * 14, ttl: 0.8 + strength * 0.6, color: [0.55, 0.56, 0.6], grow: 2.4, drag: 1.8, spin: 1.5 });
+    this.emitSmoke(p, { count: 1, speed: 0.3, spread: 0.25, up: 0.35, gravity: -0.35, size: 10 + strength * 10, ttl: 0.7 + strength * 0.5, color: [0.5, 0.52, 0.56], grow: 2.2, drag: 1.8, spin: 1.5 });
   }
   /** Footstep / landing puff. `strength` 0..1+ scales the kick. */
   dust(p: Vec3, strength = 1): void {

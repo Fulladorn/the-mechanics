@@ -245,6 +245,12 @@ export class Hud {
       if (x < m || x > innerWidth - m || y < m || y > innerHeight - m) edge = true;
       x = Math.max(m, Math.min(innerWidth - m, x));
       y = Math.max(m + 20, Math.min(innerHeight - m, y));
+      // never park on top of the objective card: slide down below it
+      const card = this.objective.getBoundingClientRect();
+      if (card.width > 0 && x < card.right + 24 && y < card.bottom + 24) {
+        if (edge && s.x < card.right) y = card.bottom + 44;
+        else x = Math.max(x, card.right + 44);
+      }
       this.waypoint.style.display = d < 2.2 ? 'none' : '';
       this.waypoint.style.left = `${x}px`;
       this.waypoint.style.top = `${y}px`;
@@ -266,11 +272,16 @@ export class Hud {
       this.beltSlots[i].classList.toggle('sel', i === p.sel && p.held === null);
     });
     const held = w.items.get(p.held);
+    // Riding with cargo strapped on: say what's on the rack.
+    const ride = p.mode === 'drive' && p.vehicle ? w.vehicle(p.vehicle) : null;
+    const cargo = ride?.def.rack ? ride.rack.map((id) => w.items.get(id)).filter((it) => !!it) : [];
     const carryText = held
       ? `Carrying <b>${itemLabel(held)}</b> · <span class="k">${bindLabel(c.bind('drop'))}</span> drop · hold to throw`
-      : '';
+      : cargo.length
+        ? `On the rack: <b>${cargo.map((it) => itemLabel(it!)).join(', ')}</b>`
+        : '';
     this.set('carry', carryText, () => (this.carry.innerHTML = carryText));
-    this.carry.classList.toggle('show', !!held && onFoot);
+    this.carry.classList.toggle('show', (!!held && onFoot) || cargo.length > 0);
 
     // vitals: only when they matter
     const hpOn = w.vitals.hp < w.vitals.maxHp - 0.5;

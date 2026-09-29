@@ -569,7 +569,12 @@ export function makeRidge(): LevelDef {
         if (!w.carrying('radiatorHose') && !w.systemOk(M, 'coolant')) return w.nearestItem('radiatorHose')?.pos ?? rvBin;
         return rvFiller;
       },
-      start: (w) => w.say('Wolves come down to the lake at dusk. Keep a flare handy — they won’t go near one.'),
+      start: (w) =>
+        w.say(
+          w.hasItem('flare')
+            ? 'Wolves come down to the lake at dusk. Flare’s on your belt — pick it with the number keys and click to light it. They won’t come near one.'
+            : 'Wolves come down to the lake at dusk, and you’ve no flare. There’s a box in the van and more at the ranger station. Get one.',
+        ),
       done: (w) =>
         (w.carrying('fuelHose') || w.systemOk(M, 'fuel')) &&
         (w.carrying('radiatorHose') || w.systemOk(M, 'coolant')) &&

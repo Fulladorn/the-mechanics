@@ -90,6 +90,8 @@ export interface WolfTarget {
   downed: boolean;
   /** Burning flares: wolves won't come near them. */
   fear?: Vec3[];
+  /** Pack discipline: another wolf is already committing to an attack. */
+  engaged?: boolean;
 }
 
 /** Distance at which a lit flare sends a wolf running. */
@@ -162,9 +164,16 @@ export function stepWolf(
         w.timer = 3;
         break;
       }
-      // Close to just outside bite range, then commit.
-      if (toPlayer > def.biteRange * 1.5) moveToward(target.pos, def.moveSpeed);
-      else {
+      // Close to just outside bite range, then commit — one at a time: the
+      // rest of the pack circles at a distance, waiting its turn.
+      const hold = target.engaged ? def.biteRange * 2.6 : def.biteRange * 1.5;
+      if (toPlayer > hold) moveToward(target.pos, def.moveSpeed);
+      else if (target.engaged) {
+        const d = vnorm({ x: w.pos.x - target.pos.x, y: 0, z: w.pos.z - target.pos.z });
+        const side = w.id % 2 ? 1 : -1;
+        w.pos.x += -d.z * side * def.moveSpeed * 0.35 * dt;
+        w.pos.z += d.x * side * def.moveSpeed * 0.35 * dt;
+      } else {
         w.state = 'telegraph';
         w.timer = def.telegraphTime;
         events.push({ t: 'wolfTelegraph', id: w.id, pos: { ...w.pos } });

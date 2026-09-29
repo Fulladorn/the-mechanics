@@ -1016,12 +1016,14 @@ export class World {
       blocking: intent.block && p.mode === 'foot',
       downed: this.vitals.downed || p.mode === 'drive',
       fear: this.flares.map((f) => f.pos),
+      engaged: false,
     };
     let bite = 0;
     const ground = (x: number, z: number) => this.terrain.heightAt(x, z);
     for (const w of this.wolves) {
       const after = this.wolfAfter.get(w.id);
       if (after && !this.flags.has(after)) continue;
+      target.engaged = this.wolves.some((o) => o !== w && (o.state === 'telegraph' || o.state === 'lunge' || o.state === 'recover'));
       bite += stepWolf(w, target, dt, combat, ground);
     }
     this.pushCombat(combat);

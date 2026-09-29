@@ -316,6 +316,14 @@ function installDebug(): void {
       input.yaw = yaw;
       input.pitch = pitch;
     },
+    /** Aim the player's view at a world point (tests drive real key presses after this). */
+    lookAt: (x: number, y: number, z: number) => {
+      if (!game) return;
+      const e = game.world.player.eye();
+      input.yaw = Math.atan2(-(x - e.x), -(z - e.z));
+      input.pitch = Math.atan2(y - e.y, Math.hypot(x - e.x, z - e.z));
+    },
+    focus: () => game?.world.focus?.label ?? null,
     look: (yaw: number, pitch = 0) => {
       input.yaw = yaw;
       input.pitch = pitch;

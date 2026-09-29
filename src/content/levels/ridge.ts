@@ -696,6 +696,7 @@ export function makeRidge(): LevelDef {
         id: 'mapBoard',
         pos: { x: R.x - 1, y: ry + 1.7, z: rz0 + 0.2 },
         r: 0.8,
+        box: { hx: 0.98, hy: 0.44, hz: 0.08 },
         label: 'Read the trail map',
         verb: 'tap',
         priority: 1,
@@ -706,8 +707,9 @@ export function makeRidge(): LevelDef {
       },
       {
         id: 'pullCord',
-        pos: { x: gen.x, y: gy(gen.x, gen.z) + 0.7, z: gen.z },
-        r: 0.5,
+        // the pull handle on the engine end (generator model: local 0.26, 0.38, 0.36)
+        pos: { x: gen.x - 0.36, y: gy(gen.x, gen.z) + 0.38, z: gen.z + 0.26 },
+        r: 0.24,
         label: (w) => (w.flag('millPower') ? 'Generator running' : 'Pull the start cord'),
         verb: 'hold',
         time: 1.4,
@@ -724,6 +726,7 @@ export function makeRidge(): LevelDef {
         id: 'rvBin',
         pos: rvBin,
         r: 0.6,
+        box: { hx: 0.5, hy: 0.3, hz: 0.1, yaw: rv.yaw },
         label: 'Open the RV storage bin',
         verb: 'tap',
         priority: 1,
@@ -781,8 +784,9 @@ export function makeRidge(): LevelDef {
       },
       {
         id: 'vanLog',
-        pos: { x: wreck.x, y: wreck.y + 1.2, z: wreck.z },
-        r: 1.2,
+        // through the smashed windscreen at the nose (the van lies on its side)
+        pos: { x: wreck.x - 2.6 * Math.sin(2.3), y: wreck.y + 1.0, z: wreck.z - 2.6 * Math.cos(2.3) },
+        r: 0.7,
         label: 'Search the wrecked van',
         verb: 'hold',
         time: 1.2,

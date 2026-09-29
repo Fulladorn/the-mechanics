@@ -58,6 +58,8 @@ export interface StationDef {
   id: string;
   pos: Vec3;
   r: number;
+  /** Target the whole face of the thing (half-extents, yaw), centred on `pos`. */
+  box?: { hx: number; hy: number; hz: number; yaw?: number };
   label: string | ((w: World) => string);
   verb: 'tap' | 'hold';
   time?: number;

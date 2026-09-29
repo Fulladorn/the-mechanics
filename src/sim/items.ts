@@ -108,8 +108,10 @@ export interface ItemSpawn {
   fill?: number;
   tag?: string;
   hiddenUntil?: string;
-  /** Start as a sleeping body placed exactly here (shelves, benches). */
+  /** Held exactly here until picked up (shelves, hooks, lockers — no collider needed underneath). */
   pinned?: boolean;
+  /** Start asleep where placed, but knockable (cones on the ground, a crate on a container). */
+  sleep?: boolean;
   /** Spawn straight into a machine slot (see machine.ts) instead of the world. */
   mounted?: boolean;
 }
@@ -146,12 +148,15 @@ export class ItemManager {
       state: s.mounted ? 'mounted' : 'world',
       pos: { ...s.pos },
       rot: s.yaw ? { x: 0, y: Math.sin(s.yaw / 2), z: 0, w: Math.cos(s.yaw / 2) } : qIdentity(),
-      asleep: !!s.pinned,
+      asleep: !!s.pinned || !!s.sleep,
       hiddenUntil: s.hiddenUntil,
       pinned: s.pinned,
     };
     this.list.push(it);
-    if (it.state === 'world' && !it.hiddenUntil) this.makeBody(it, { x: 0, y: 0, z: 0 });
+    if (it.state === 'world' && !it.hiddenUntil) {
+      this.makeBody(it, { x: 0, y: 0, z: 0 });
+      if (s.sleep) this.bodies.get(it.id)?.sleep();
+    }
     return it;
   }
 
@@ -170,7 +175,10 @@ export class ItemManager {
 
   private makeBody(it: WorldItem, vel: Vec3, angvel?: Vec3): void {
     const def = ITEM_DEFS[it.kind];
-    const desc = RAPIER.RigidBodyDesc.dynamic()
+    // Pinned things (tools on a shelf, a key on a hook, cones set out) stay
+    // exactly where they were placed until someone picks them up — a sleeping
+    // dynamic body would drop the moment anything nudged it awake.
+    const desc = (it.pinned ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic())
       .setTranslation(it.pos.x, it.pos.y, it.pos.z)
       .setRotation(it.rot)
       .setLinvel(vel.x, vel.y, vel.z)
@@ -190,7 +198,6 @@ export class ItemManager {
       .setRestitution(0.15)
       .setCollisionGroups(groups(G.ITEM, G.STATIC | G.VEHICLE | G.ITEM | G.PLAYER | G.DOOR));
     this.phys.attach(cdesc, body, { surface: 'metal', owner: `item:${it.id}` });
-    if (it.pinned) body.sleep();
     this.bodies.set(it.id, body);
   }
 

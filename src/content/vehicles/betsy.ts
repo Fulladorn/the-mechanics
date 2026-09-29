@@ -37,7 +37,7 @@ export const BETSY_VEHICLE: VehicleDef = {
   steer: { max: 0.55, atSpeed: 0.28, rate: 2.4 },
   seat: { x: -0.36, y: 0.86, z: -0.1 },
   exit: { x: -1.75, y: -0.5, z: -0.35 },
-  door: { pos: { x: -0.95, y: 0.35, z: -0.35 }, r: 0.62 },
+  door: { pos: { x: -0.9, y: 0.45, z: -0.45 }, r: 0.42 },
 };
 
 export const BETSY_MACHINE: MachineDef = {
@@ -45,7 +45,7 @@ export const BETSY_MACHINE: MachineDef = {
   name: 'Betsy',
   inspect: { pos: { x: 0, y: 0.1, z: 0 }, r: 1.9 },
   components: [
-    { t: 'cover', id: 'hood', label: 'Hood', pos: { x: 0, y: 0.3, z: -2.18 }, openPos: { x: 0, y: 1.5, z: -1.52 }, r: 0.4, closeToDrive: true },
+    { t: 'cover', id: 'hood', label: 'Hood', pos: { x: 0, y: 0.3, z: -2.18 }, openPos: { x: 0, y: 1.5, z: -1.52 }, box: { pos: { x: 0, y: 0.32, z: -1.62 }, hx: 0.76, hy: 0.08, hz: 0.66 }, r: 0.4, closeToDrive: true },
     wheelSlot('wheelFL', 'Front-left wheel', { x: -TRACK, y: HUB_Y, z: FRONT }, -1, 'jackFL'),
     wheelSlot('wheelFR', 'Front-right wheel', { x: TRACK, y: HUB_Y, z: FRONT }, 1, 'jackFR'),
     wheelSlot('wheelRL', 'Rear-left wheel', { x: -TRACK, y: HUB_Y, z: REAR }, -1, 'jackRL', 'on the tyre rack'),

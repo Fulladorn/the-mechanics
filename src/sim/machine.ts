@@ -53,6 +53,8 @@ export interface CoverDef {
   pos: Vec3;
   /** Where the grab point is once it's swung open (a raised hood's lip). */
   openPos?: Vec3;
+  /** Closed, the whole panel is the target: centre + half-extents in the machine frame. */
+  box?: { pos: Vec3; hx: number; hy: number; hz: number };
   r?: number;
   open?: boolean;
   /** Must be closed before driving. */
@@ -525,14 +527,17 @@ export class Machine {
         case 'cover': {
           const open = s.covers[c.id];
           const grab = open && c.openPos ? this.world(c.openPos) : at;
+          const panel = !open && c.box;
           out.push({
             id: tgt('cover', c.id),
-            pos: grab,
-            r: c.r ?? 0.35,
+            pos: panel ? this.world(c.box!.pos) : grab,
+            r: panel ? Math.max(c.box!.hx, c.box!.hz) : c.r ?? 0.35,
+            box: panel ? { hx: c.box!.hx, hy: c.box!.hy, hz: c.box!.hz, rot: this.rot } : undefined,
             label: `${open ? 'Close' : 'Open'} the ${c.label.toLowerCase()}`,
             verb: 'tap',
-            // A raised hood sits clear above the engine: aiming at it is deliberate.
-            priority: open && c.openPos ? 0 : -1,
+            // A raised hood sits clear above the engine, and a closed panel is a
+            // big deliberate target: both are first-class. A bare lip is a fallback.
+            priority: (open && c.openPos) || panel ? 0 : -1,
             target: tgt('cover', c.id),
             run: () => {
               s.covers[c.id] = !open;

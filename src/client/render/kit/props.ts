@@ -31,12 +31,24 @@ function lockers(p: PropDef): PropBuild {
   const doors: THREE.Object3D[] = [];
   for (let i = 0; i < n; i++) {
     const x = -1.2 + w * (i + 0.5);
-    g.add(mesh(rbox(w - 0.02, 2.0, 0.5, 0.02), body, x, 1.0, 0));
-    // interior (visible when open)
-    const back = mesh(rbox(w - 0.1, 1.9, 0.02, 0.005), styl({ color: 0x2b3440, rough: 0.8 }), x, 1.0, -0.2);
-    g.add(back);
-    const shelf = mesh(rbox(w - 0.1, 0.03, 0.4, 0.005), styl({ color: 0x46505e, rough: 0.7 }), x, 1.05, 0);
+    // a real cabinet — back, sides, roof, floor, a shelf and a hook rail — so
+    // an open door shows what's inside instead of a solid block
+    const inside = styl({ color: 0x3a4654, rough: 0.8 });
+    g.add(mesh(rbox(w - 0.02, 2.0, 0.03, 0.01), body, x, 1.0, -0.235));
+    for (const sx of [-1, 1]) g.add(mesh(rbox(0.025, 2.0, 0.5, 0.008), body, x + sx * (w / 2 - 0.0125), 1.0, 0));
+    g.add(mesh(rbox(w - 0.02, 0.03, 0.5, 0.008), body, x, 1.985, 0));
+    g.add(mesh(rbox(w - 0.02, 0.08, 0.5, 0.01), styl({ color: 0x2b3440, rough: 0.8 }), x, 0.04, 0));
+    g.add(mesh(rbox(w - 0.06, 1.9, 0.01, 0.004), inside, x, 1.0, -0.215));
+    const shelf = mesh(rbox(w - 0.06, 0.03, 0.44, 0.005), styl({ color: 0x5b6878, rough: 0.6, metal: 0.3 }), x, 1.05, -0.01);
     g.add(shelf);
+    g.add(mesh(cyl(0.008, 0.008, w - 0.08, 6), MAT.chrome(), x, 1.78, -0.05).rotateZ(Math.PI / 2));
+    if (i === openIdx) {
+      // the rookie's things: a hi-vis vest on the rail, boots on the floor
+      const vest = mesh(rbox(0.36, 0.5, 0.06, 0.03), MAT.fabric(0xf2a33a), x, 1.5, -0.08);
+      g.add(vest);
+      g.add(mesh(rbox(0.36, 0.03, 0.061, 0.01), styl({ color: 0xe8e8e0, rough: 0.5, emissive: 0x777777, emissiveIntensity: 0.3 }), x, 1.42, -0.08));
+      for (const bx of [-0.08, 0.08]) g.add(mesh(rbox(0.1, 0.14, 0.24, 0.04), MAT.fabric(0x4a3a2a), x + bx, 0.15, 0.0));
+    }
     const pivot = new THREE.Group();
     pivot.position.set(x - w / 2 + 0.02, 0, 0.26);
     const door = mesh(rbox(w - 0.04, 1.94, 0.03, 0.01), body, w / 2 - 0.02, 1.0, 0);

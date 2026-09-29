@@ -526,10 +526,19 @@ export class World {
       if (Math.hypot(c.x - eye.x, c.y - eye.y, c.z - eye.z) > reach + 1) continue;
       const locked = def.locked && !d.open && !this.hasItem('key', def.locked) ? `Locked — needs the ${def.locked} key` : undefined;
       const name = def.label ?? 'door';
+      // the whole door leaf is the target (swung open, it's where it hangs)
+      const sw = d.open ? -1.6 * 1 : 0;
+      const ay = def.yaw + sw;
+      const leaf = {
+        x: def.hinge.x + Math.cos(ay) * def.width * 0.5,
+        y: def.hinge.y + Math.min(1.1, def.height / 2),
+        z: def.hinge.z - Math.sin(ay) * def.width * 0.5,
+      };
       out.push({
         id: `door:${def.id}`,
-        pos: c,
-        r: 0.6,
+        pos: leaf,
+        r: Math.max(def.width / 2, 0.6),
+        box: { hx: def.width / 2, hy: Math.min(1.1, def.height / 2), hz: 0.12, rot: qYaw(ay) },
         label: `${d.open ? 'Close' : 'Open'} the ${name}`,
         verb: 'tap',
         priority: -1,
@@ -611,7 +620,8 @@ export class World {
     return {
       id: `station:${st.id}`,
       pos: st.pos,
-      r: st.r,
+      r: st.box ? Math.max(st.r, st.box.hx, st.box.hy) : st.r,
+      box: st.box ? { hx: st.box.hx, hy: st.box.hy, hz: st.box.hz, rot: qYaw(st.box.yaw ?? 0) } : undefined,
       label: typeof st.label === 'function' ? st.label(this) : st.label,
       verb: st.verb,
       time: st.time,
@@ -859,7 +869,9 @@ export class World {
     this.focus = pickFocus({ origin: eye, dir }, cands, INTERACT_REACH, (c, dist) => {
       // Walls and terrain block the crosshair; the thing itself doesn't.
       const hit = this.phys.castRay(eye, dir, dist, G.STATIC | G.DOOR);
-      if (!hit || hit.toi > dist - c.r - 0.05) return false;
+      // For boxes `dist` is where the ray enters the face; for spheres allow
+      // for the radius (the collider may wrap the thing itself).
+      if (!hit || hit.toi > dist - (c.box ? 0.02 : c.r) - 0.05) return false;
       const owner = hit.tag?.owner ?? '';
       return !(c.target && owner && c.target.startsWith(owner));
     });

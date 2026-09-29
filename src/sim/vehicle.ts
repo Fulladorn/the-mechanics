@@ -1,250 +1,332 @@
-import type { Vec3 } from '../shared/math';
-import {
-  VEHICLE_BASE_ACCEL,
-  VEHICLE_BASE_DURABILITY,
-  VEHICLE_BASE_GRIP,
-  VEHICLE_BASE_TOPSPEED,
-} from '../shared/constants';
+import type { Quat, Vec3 } from '../shared/math';
+import { approach, clamp, frameToWorld, qRotate, qYaw } from '../shared/math';
+import { G, Physics, RAPIER, groups, toQuat, toVec, type RBody } from './physics';
+import type { Machine } from './machine';
+import type { ItemManager } from './items';
 
-// The buildable vehicle: a bare chassis with sockets you fill by carrying parts
-// over and bolting them on. Pure + deterministic + DOM-free (mirrors puzzles/*).
-// Part *variants* change both looks (render params) and driving stats.
+// A drivable vehicle: a Rapier chassis with a raycast wheel controller. Real
+// suspension travel, weight transfer, and a slope that actually pulls on you.
+//
+// While you're working on it the body is PINNED (fixed): a jacked-up truck
+// with a wheel off must not twitch because the solver disagrees with itself.
+// It only turns dynamic when it can actually roll.
 
-export type PartKind =
-  | 'wheel'
-  | 'engine'
-  | 'battery'
-  | 'seat'
-  | 'body'
-  | 'bumper'
-  | 'headlights'
-  | 'spoiler'
-  | 'exhaust'
-  | 'fuel'
-  | 'brakes'
-  | 'coolant'
-  | 'winch'
-  | 'rooflight';
-
-/** Which diegetic minigame repairs a broken system. */
-export type PuzzleKind = 'fuse' | 'bolt' | 'valve';
-
-export interface StatDelta {
-  topSpeed: number;
-  accel: number;
-  grip: number;
-  durability: number;
+export interface WheelDef {
+  /** Machine slot holding this wheel (a missing/flat wheel changes the car). */
+  slot?: string;
+  pos: Vec3;
+  radius: number;
+  steer: boolean;
+  drive: boolean;
 }
 
-export interface PartVariant {
+export interface VehicleDef {
   id: string;
-  kind: PartKind;
   name: string;
-  stats: StatDelta;
-  /** Pure render params consumed by the mesh builder (no Three import here). */
-  render: { color?: number; shape?: string; scale?: number };
-}
-
-export interface Socket {
-  id: string;
-  accepts: PartKind;
-  required: boolean;
-  anchor: Vec3; // local offset on the chassis (chassis faces -Z, like the kart)
-  installed: string | null; // PartVariant.id
-  /**
-   * Non-null when a part *is* fitted but faulty: the system reads BROKEN and is
-   * cleared by solving this puzzle rather than by carrying a replacement.
-   */
-  broken?: PuzzleKind | null;
-  /** Human label for the repair checklist; falls back to the item label. */
-  label?: string;
-}
-
-/** GDD system states: a socket is one of these at any moment. */
-export type SystemState = 'MISSING' | 'BROKEN' | 'GO';
-
-export const socketState = (s: Socket): SystemState =>
-  s.installed === null ? 'MISSING' : s.broken ? 'BROKEN' : 'GO';
-
-export interface Vehicle {
-  sockets: Socket[];
-  bodyColor: number;
-  baseStats: StatDelta;
-}
-
-export interface VehicleStats {
-  topSpeed: number;
-  accel: number;
+  kind: 'truck' | 'atv';
+  mass: number;
+  /** Chassis collision boxes (local). */
+  hulls: { half: Vec3; offset: Vec3 }[];
+  /** Centre of mass, local. Low = hard to roll. */
+  com: Vec3;
+  wheels: WheelDef[];
+  suspension: { rest: number; travel: number; stiffness: number; compression: number; relaxation: number };
   grip: number;
-  durability: number;
+  engine: { force: number; brake: number; topSpeed: number; reverseSpeed: number };
+  steer: { max: number; atSpeed: number; rate: number };
+  /** Driver's eye, local. */
+  seat: Vec3;
+  /** Where you step out, local. */
+  exit: Vec3;
+  /** Where you stand to get in. */
+  door: { pos: Vec3; r: number };
+  /** ATV cargo rack, local. */
+  rack?: Vec3;
 }
 
-const d = (
-  topSpeed = 0,
-  accel = 0,
-  grip = 0,
-  durability = 0,
-): StatDelta => ({ topSpeed, accel, grip, durability });
-
-// Data-driven catalog. The first variant of each kind is the "base" (zero delta)
-// so a base-variant build reproduces the legacy kart feel exactly.
-export const PART_VARIANTS: Record<PartKind, PartVariant[]> = {
-  wheel: [
-    { id: 'wheel.street', kind: 'wheel', name: 'Street Tires', stats: d(), render: { shape: 'street', color: 0x1b1e24 } },
-    { id: 'wheel.offroad', kind: 'wheel', name: 'Off-road Tires', stats: d(-0.3, 0, 0.05, 0.05), render: { shape: 'offroad', color: 0x14171b } },
-    { id: 'wheel.slick', kind: 'wheel', name: 'Racing Slicks', stats: d(0.5, 0.2, -0.03, 0), render: { shape: 'slick', color: 0x202228 } },
-  ],
-  engine: [
-    { id: 'engine.v4', kind: 'engine', name: 'Stock V4', stats: d(), render: { color: 0x3b6ea5 } },
-    { id: 'engine.v6', kind: 'engine', name: 'Turbo V6', stats: d(3, 3, 0, 0), render: { color: 0xb5793c } },
-    { id: 'engine.v8', kind: 'engine', name: 'Roaring V8', stats: d(6, 5, -0.04, 0), render: { color: 0xd14b3a } },
-  ],
-  battery: [
-    { id: 'battery.std', kind: 'battery', name: 'Standard Cell', stats: d(), render: { color: 0x2f7fd1 } },
-    { id: 'battery.hd', kind: 'battery', name: 'Heavy-duty Cell', stats: d(0, 1, 0, 0.1), render: { color: 0x39b36b } },
-  ],
-  seat: [
-    { id: 'seat.std', kind: 'seat', name: 'Bench Seat', stats: d(), render: { color: 0x222831 } },
-    { id: 'seat.racing', kind: 'seat', name: 'Racing Bucket', stats: d(0, 0.5, 0, 0), render: { color: 0xc0392b } },
-  ],
-  body: [
-    { id: 'body.std', kind: 'body', name: 'Steel Shell', stats: d(), render: { color: 0xe5484d } },
-    { id: 'body.light', kind: 'body', name: 'Fiberglass Shell', stats: d(1, 1.5, 0, -0.1), render: { color: 0xf1c40f } },
-    { id: 'body.armor', kind: 'body', name: 'Armor Plating', stats: d(-1.5, 0, 0, 0.3), render: { color: 0x6b7280 } },
-  ],
-  bumper: [
-    { id: 'bumper.std', kind: 'bumper', name: 'Steel Bumper', stats: d(0, 0, 0, 0.15), render: { color: 0x2a2f3a } },
-    { id: 'bumper.bull', kind: 'bumper', name: 'Bull Bar', stats: d(-0.5, 0, 0, 0.3), render: { color: 0x9aa0aa } },
-  ],
-  headlights: [
-    { id: 'headlights.std', kind: 'headlights', name: 'Headlights', stats: d(), render: { color: 0xfff2c8 } },
-  ],
-  spoiler: [
-    { id: 'spoiler.gt', kind: 'spoiler', name: 'GT Wing', stats: d(-0.5, 0, 0.08, 0), render: { color: 0x202228 } },
-  ],
-  exhaust: [
-    { id: 'exhaust.sport', kind: 'exhaust', name: 'Sport Exhaust', stats: d(1, 0.5, 0, 0), render: { color: 0x9aa0aa } },
-  ],
-  // --- field-repair systems (Mountains and later missions) ---
-  fuel: [{ id: 'fuel.can', kind: 'fuel', name: 'Fuel Line & Can', stats: d(), render: { color: 0xd14b3a } }],
-  brakes: [{ id: 'brakes.std', kind: 'brakes', name: 'Brake Assembly', stats: d(0, 0, 0.08, 0), render: { color: 0x8a8f99 } }],
-  coolant: [{ id: 'coolant.std', kind: 'coolant', name: 'Coolant Loop', stats: d(), render: { color: 0x2f9fd1 } }],
-  winch: [{ id: 'winch.std', kind: 'winch', name: 'Recovery Winch', stats: d(-0.5, 0, 0, 0.25), render: { color: 0xffb020 } }],
-  rooflight: [{ id: 'rooflight.bar', kind: 'rooflight', name: 'Roof Light Bar', stats: d(), render: { color: 0xfff2c8 } }],
-};
-
-const variantMap: Map<string, PartVariant> = (() => {
-  const m = new Map<string, PartVariant>();
-  for (const list of Object.values(PART_VARIANTS)) for (const v of list) m.set(v.id, v);
-  return m;
-})();
-
-export const variantById = (id: string): PartVariant | undefined => variantMap.get(id);
-/** First variant of a kind, or undefined if the kind isn't a vehicle part. */
-export const defaultVariant = (kind: PartKind): PartVariant | undefined => PART_VARIANTS[kind]?.[0];
-
-/** The Garage's build-your-own chassis: every socket starts empty. */
-export function makeVehicle(sockets?: Socket[]): Vehicle {
-  return {
-    sockets: sockets ? sockets.map((s) => ({ ...s, anchor: { ...s.anchor } })) : defaultSockets(),
-    bodyColor: 0xe5484d,
-    baseStats: {
-      topSpeed: VEHICLE_BASE_TOPSPEED,
-      accel: VEHICLE_BASE_ACCEL,
-      grip: VEHICLE_BASE_GRIP,
-      durability: VEHICLE_BASE_DURABILITY,
-    },
-  };
+export interface WheelVisual {
+  /** Suspension-compressed hub height offset, local metres. */
+  hub: number;
+  steer: number;
+  spin: number;
+  contact: boolean;
 }
 
-function defaultSockets(): Socket[] {
-  const sockets: Socket[] = [
-    { id: 'wheelFL', accepts: 'wheel', required: true, anchor: { x: -0.85, y: 0.4, z: -0.85 }, installed: null },
-    { id: 'wheelFR', accepts: 'wheel', required: true, anchor: { x: 0.85, y: 0.4, z: -0.85 }, installed: null },
-    { id: 'wheelRL', accepts: 'wheel', required: true, anchor: { x: -0.85, y: 0.4, z: 0.85 }, installed: null },
-    { id: 'wheelRR', accepts: 'wheel', required: true, anchor: { x: 0.85, y: 0.4, z: 0.85 }, installed: null },
-    { id: 'engine', accepts: 'engine', required: true, anchor: { x: 0, y: 0.7, z: 0.95 }, installed: null },
-    { id: 'seat', accepts: 'seat', required: true, anchor: { x: 0, y: 0.85, z: 0.1 }, installed: null },
-    { id: 'body', accepts: 'body', required: true, anchor: { x: 0, y: 0.6, z: 0 }, installed: null },
-    { id: 'battery', accepts: 'battery', required: false, anchor: { x: 0.5, y: 0.7, z: -0.7 }, installed: null },
-    { id: 'bumper', accepts: 'bumper', required: false, anchor: { x: 0, y: 0.42, z: -1.25 }, installed: null },
-    { id: 'headlights', accepts: 'headlights', required: false, anchor: { x: 0, y: 0.5, z: -1.2 }, installed: null },
-    { id: 'spoiler', accepts: 'spoiler', required: false, anchor: { x: 0, y: 0.95, z: 1.2 }, installed: null },
-    { id: 'exhaust', accepts: 'exhaust', required: false, anchor: { x: 0.5, y: 0.22, z: 1.25 }, installed: null },
-  ];
-  return sockets;
+export interface VehicleIntent {
+  throttle: number; // -1..1
+  steer: number; // -1 (right)..1 (left)
+  handbrake: boolean;
 }
 
-/** Open sockets that accept a part kind (the client picks the nearest by world pos). */
-export function openSockets(v: Vehicle, kind: PartKind): Socket[] {
-  return v.sockets.filter((s) => s.accepts === kind && s.installed === null);
-}
+export class Vehicle {
+  readonly body: RBody;
+  private ctrl: RAPIER.DynamicRayCastVehicleController;
+  occupied = false;
+  /** Seconds of engine crank left after getting in. */
+  crank = 0;
+  running = false;
+  lights = false;
+  integrity = 1;
+  /** Seconds spent upside down. */
+  flipped = 0;
+  /** Scripted slow roll (the cliff-edge opener). */
+  creep = 0;
+  pinned = false;
+  private pinLift = 0;
+  steer = 0;
+  throttle = 0;
+  brake = 0;
+  speed = 0;
+  wheels: WheelVisual[];
+  pos: Vec3;
+  rot: Quat;
+  private prevVel: Vec3 = { x: 0, y: 0, z: 0 };
+  /** Impact severity this tick (0 when none). */
+  impact = 0;
+  /** Items strapped to the cargo rack, bottom first. */
+  rack: number[] = [];
+  /** Rolling average for audio (engine load). */
+  load = 0;
 
-/** Filled sockets of a kind — the ones you can swap a carried part into. */
-export function filledSockets(v: Vehicle, kind: PartKind): Socket[] {
-  return v.sockets.filter((s) => s.accepts === kind && s.installed !== null);
-}
+  constructor(
+    readonly def: VehicleDef,
+    readonly key: string,
+    private phys: Physics,
+    pos: Vec3,
+    yaw: number,
+    readonly machine: Machine | null,
+  ) {
+    const q = qYaw(yaw);
+    this.body = phys.createBody(
+      RAPIER.RigidBodyDesc.dynamic()
+        .setTranslation(pos.x, pos.y, pos.z)
+        .setRotation(q)
+        .setLinearDamping(0.05)
+        .setAngularDamping(0.8)
+        .setCcdEnabled(true),
+    );
+    const hullMass = def.mass / def.hulls.length;
+    for (const h of def.hulls) {
+      const desc = RAPIER.ColliderDesc.roundCuboid(Math.max(0.05, h.half.x - 0.06), Math.max(0.05, h.half.y - 0.06), Math.max(0.05, h.half.z - 0.06), 0.06)
+        .setTranslation(h.offset.x, h.offset.y, h.offset.z)
+        .setMass(hullMass)
+        .setFriction(0.5)
+        .setRestitution(0.05)
+        .setCollisionGroups(groups(G.VEHICLE, G.STATIC | G.VEHICLE | G.ITEM | G.PLAYER | G.DOOR));
+      phys.attach(desc, this.body, { surface: 'metal', owner: `vehicle:${key}` });
+    }
+    // Pull the centre of mass down to where a real chassis carries its weight.
+    this.body.setAdditionalMassProperties(
+      def.mass * 0.35,
+      def.com,
+      { x: def.mass * 0.6, y: def.mass * 0.8, z: def.mass * 0.35 },
+      { x: 0, y: 0, z: 0, w: 1 },
+      true,
+    );
 
-/** Sockets that are fitted but faulty, i.e. waiting on a repair puzzle. */
-export function brokenSockets(v: Vehicle): Socket[] {
-  return v.sockets.filter((s) => s.installed !== null && !!s.broken);
-}
-
-export function socketById(v: Vehicle, id: string): Socket | undefined {
-  return v.sockets.find((s) => s.id === id);
-}
-
-/** Install (or swap) a variant into a socket. Returns true if it changed. */
-export function installPart(v: Vehicle, socketId: string, variantId: string): boolean {
-  const s = socketById(v, socketId);
-  const variant = variantById(variantId);
-  if (!s || !variant || variant.kind !== s.accepts) return false;
-  if (s.installed === variantId) return false;
-  s.installed = variantId;
-  return true;
-}
-
-/** Pull a part back out of a socket. Returns the variant that came out. */
-export function uninstallPart(v: Vehicle, socketId: string): string | null {
-  const s = socketById(v, socketId);
-  if (!s || s.installed === null || s.broken) return null;
-  const was = s.installed;
-  s.installed = null;
-  return was;
-}
-
-/** Clear a socket's fault (the repair puzzle was solved). */
-export function repairSocket(v: Vehicle, socketId: string): boolean {
-  const s = socketById(v, socketId);
-  if (!s || !s.broken) return false;
-  s.broken = null;
-  return true;
-}
-
-export const isDrivable = (v: Vehicle): boolean =>
-  v.sockets.every((s) => !s.required || (s.installed !== null && !s.broken));
-
-export const requiredRemaining = (v: Vehicle): PartKind[] =>
-  v.sockets.filter((s) => s.required && (s.installed === null || s.broken)).map((s) => s.accepts);
-
-const clampStats = (s: VehicleStats): VehicleStats => ({
-  topSpeed: Math.max(6, s.topSpeed),
-  accel: Math.max(6, s.accel),
-  grip: Math.max(0.4, s.grip),
-  durability: Math.max(0.5, s.durability),
-});
-
-/** Resolve absolute stats = base + sum of installed variant deltas (order-independent). */
-export function deriveStats(v: Vehicle): VehicleStats {
-  const out: VehicleStats = { ...v.baseStats };
-  for (const s of v.sockets) {
-    if (!s.installed) continue;
-    const variant = variantById(s.installed);
-    if (!variant) continue;
-    out.topSpeed += variant.stats.topSpeed;
-    out.accel += variant.stats.accel;
-    out.grip += variant.stats.grip;
-    out.durability += variant.stats.durability;
+    this.ctrl = phys.world.createVehicleController(this.body);
+    const s = def.suspension;
+    def.wheels.forEach((w, i) => {
+      // Axle +X makes positive engine force drive toward -Z (our forward).
+      this.ctrl.addWheel(w.pos, { x: 0, y: -1, z: 0 }, { x: 1, y: 0, z: 0 }, s.rest, w.radius);
+      this.ctrl.setWheelSuspensionStiffness(i, s.stiffness);
+      this.ctrl.setWheelSuspensionCompression(i, s.compression);
+      this.ctrl.setWheelSuspensionRelaxation(i, s.relaxation);
+      this.ctrl.setWheelMaxSuspensionTravel(i, s.travel);
+      this.ctrl.setWheelMaxSuspensionForce(i, def.mass * 60);
+      this.ctrl.setWheelFrictionSlip(i, def.grip);
+      this.ctrl.setWheelSideFrictionStiffness(i, 1);
+    });
+    this.wheels = def.wheels.map(() => ({ hub: 0, steer: 0, spin: 0, contact: false }));
+    this.pos = { ...pos };
+    this.rot = q;
+    this.syncMachine();
   }
-  return clampStats(out);
+
+  forward(): Vec3 {
+    return qRotate(this.rot, { x: 0, y: 0, z: -1 });
+  }
+
+  up(): Vec3 {
+    return qRotate(this.rot, { x: 0, y: 1, z: 0 });
+  }
+
+  world(local: Vec3): Vec3 {
+    return frameToWorld(this.pos, this.rot, local);
+  }
+
+  /** A wheel's slot is empty: the car can't roll on it. */
+  private wheelMissing(items: ItemManager): boolean {
+    if (!this.machine) return false;
+    return this.def.wheels.some((w) => w.slot && !this.machine!.state.slots[w.slot]);
+  }
+
+  /**
+   * Decide whether the body should be pinned this tick. Jacked, chocked or
+   * missing a wheel → pinned; the renderer still animates the jack lift.
+   */
+  updatePin(items: ItemManager, forced: boolean): void {
+    const m = this.machine;
+    const lift = m ? m.jackLift() : 0;
+    const want = !this.occupied && (forced || (m ? m.anyJackRaised() : false) || this.wheelMissing(items));
+    if (want && !this.pinned) {
+      this.pinned = true;
+      this.body.setLinvel({ x: 0, y: 0, z: 0 }, false);
+      this.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
+      this.body.setBodyType(RAPIER.RigidBodyType.Fixed, false);
+    } else if (!want && this.pinned) {
+      this.pinned = false;
+      // Drop the jack lift before letting physics have it back.
+      if (this.pinLift) {
+        const t = this.body.translation();
+        this.body.setTranslation({ x: t.x, y: t.y - this.pinLift, z: t.z }, false);
+        this.pinLift = 0;
+      }
+      this.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+    }
+    if (this.pinned && lift !== this.pinLift) {
+      const t = this.body.translation();
+      this.body.setTranslation({ x: t.x, y: t.y + (lift - this.pinLift), z: t.z }, true);
+      this.pinLift = lift;
+    }
+  }
+
+  /** Apply controls before the physics step. */
+  control(intent: VehicleIntent | null, dt: number, items: ItemManager): void {
+    const def = this.def;
+    this.impact = 0;
+    if (this.pinned) return;
+
+    // Something is about to push on it: make sure the body is awake, or its
+    // velocity (and the controller's) is stale.
+    if (this.occupied || this.creep > 0) this.body.wakeUp();
+    const lv = this.body.linvel();
+    const f = this.forward();
+    const speed = lv.x * f.x + lv.y * f.y + lv.z * f.z;
+    this.speed = speed;
+    const fwdSpeed = speed;
+    let engine = 0;
+    let brake = 0;
+    let steerTarget = 0;
+    let handbrake = false;
+
+    if (this.occupied && intent && this.running) {
+      const t = intent.throttle;
+      if (t > 0) {
+        if (fwdSpeed < -0.5) brake = def.engine.brake;
+        else if (fwdSpeed < def.engine.topSpeed) engine = def.engine.force * t;
+      } else if (t < 0) {
+        if (fwdSpeed > 0.5) brake = def.engine.brake;
+        else if (fwdSpeed > -def.engine.reverseSpeed) engine = def.engine.force * 0.6 * t;
+      } else {
+        brake = def.engine.brake * 0.06; // engine braking / rolling resistance
+      }
+      const k = clamp(Math.abs(fwdSpeed) / def.engine.topSpeed, 0, 1);
+      steerTarget = intent.steer * def.steer.max * (1 - k * (1 - def.steer.atSpeed));
+      handbrake = intent.handbrake;
+      this.throttle = t;
+    } else if (this.creep > 0) {
+      // The handbrake has given up; gravity does the rest, slowly.
+      brake = Math.abs(fwdSpeed) > this.creep ? def.engine.brake * 0.4 : 0;
+      this.throttle = 0;
+    } else {
+      brake = def.engine.brake * (this.occupied ? 0.3 : 1);
+      this.throttle = 0;
+    }
+    this.steer = approach(this.steer, steerTarget, def.steer.rate * dt);
+    this.brake = brake;
+    this.load = approach(this.load, Math.abs(engine) / def.engine.force, dt * 4);
+
+    const missing = this.wheelMissing(items);
+    def.wheels.forEach((w, i) => {
+      this.ctrl.setWheelSteering(i, w.steer ? this.steer : 0);
+      this.ctrl.setWheelEngineForce(i, w.drive ? engine / Math.max(1, def.wheels.filter((x) => x.drive).length) : 0);
+      const rear = !w.steer;
+      this.ctrl.setWheelBrake(i, handbrake && rear ? def.engine.brake * 1.5 : brake / def.wheels.length);
+      // A shredded tyre grips badly and sits low.
+      const bad = w.slot && this.machine ? items.get(this.machine.state.slots[w.slot])?.cond === 'bad' : false;
+      this.ctrl.setWheelRadius(i, bad ? w.radius * 0.84 : w.radius);
+      this.ctrl.setWheelFrictionSlip(i, (bad ? def.grip * 0.55 : def.grip) * (handbrake && rear ? 0.45 : 1));
+      if (missing) this.ctrl.setWheelEngineForce(i, 0);
+    });
+
+    this.ctrl.updateVehicle(dt, undefined, groups(G.VEHICLE, G.STATIC | G.DOOR));
+  }
+
+  /** Read back after the physics step. */
+  sync(dt: number): void {
+    const t = this.body.translation();
+    const r = this.body.rotation();
+    this.pos = toVec(t);
+    this.rot = toQuat(r);
+    this.syncMachine();
+
+    const v = this.body.linvel();
+    if (!this.pinned) {
+      // Impacts: a sudden change in velocity beyond what gravity explains.
+      const dv = Math.hypot(v.x - this.prevVel.x, v.y - this.prevVel.y - -15 * dt, v.z - this.prevVel.z);
+      if (dv > 5) this.impact = (dv - 5) / 10;
+    }
+    this.prevVel = { x: v.x, y: v.y, z: v.z };
+
+    if (this.creep > 0 && !this.pinned) {
+      // Keep the scripted roll a creep, not a runaway, until it's off the edge.
+      const sp = Math.hypot(v.x, v.z);
+      const up = this.up();
+      if (sp > this.creep * 1.4 && up.y > 0.9) {
+        const k = (this.creep * 1.4) / sp;
+        this.body.setLinvel({ x: v.x * k, y: v.y, z: v.z * k }, true);
+      }
+    }
+
+    this.def.wheels.forEach((w, i) => {
+      const wv = this.wheels[i];
+      const len = this.ctrl.wheelSuspensionLength(i) ?? this.def.suspension.rest;
+      wv.hub = -len;
+      wv.steer = this.ctrl.wheelSteering(i) ?? 0;
+      wv.contact = this.ctrl.wheelIsInContact(i);
+      if (this.pinned) return;
+      wv.spin += (this.speed / w.radius) * dt;
+    });
+
+    const up = this.up();
+    this.flipped = up.y < 0.3 ? this.flipped + dt : 0;
+  }
+
+  private syncMachine(): void {
+    if (!this.machine) return;
+    this.machine.pos = this.pos;
+    this.machine.rot = this.rot;
+  }
+
+  /** Put it back on its wheels, a little above where it was. */
+  unflip(): void {
+    const t = this.body.translation();
+    const f = this.forward();
+    const yaw = Math.atan2(-f.x, -f.z);
+    this.body.setTranslation({ x: t.x, y: t.y + 1.6, z: t.z }, true);
+    this.body.setRotation(qYaw(yaw), true);
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.flipped = 0;
+  }
+
+  /** Teleport (checkpoints, cinematics). */
+  place(pos: Vec3, yaw: number): void {
+    const wasPinned = this.pinned;
+    if (wasPinned) this.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+    this.body.setTranslation(pos, true);
+    this.body.setRotation(qYaw(yaw), true);
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    this.pinLift = 0;
+    this.pinned = false;
+    this.pos = { ...pos };
+    this.rot = qYaw(yaw);
+    this.syncMachine();
+  }
+
+  linvel(): Vec3 {
+    return toVec(this.body.linvel());
+  }
 }

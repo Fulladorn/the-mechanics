@@ -25,6 +25,9 @@ interface EmitOpts {
  * pool for sparks/glints and an alpha-blended pool for smoke and dust —
  * previously everything was additive, so smoke was impossible.
  */
+/** Pixels per metre at 1 m depth; set from the camera each frame. */
+export const PARTICLE_SCALE = { value: 460 };
+
 class Pool {
   private pos: Float32Array;
   private vel: Float32Array;
@@ -43,7 +46,7 @@ class Pool {
   private head = 0;
   private live = 0;
 
-  constructor(scene: THREE.Scene, readonly max: number, additive: boolean, map: THREE.Texture, softness: number) {
+  constructor(scene: THREE.Scene, readonly max: number, additive: boolean, map: THREE.Texture, softness: number, private ground: (x: number, z: number) => number) {
     this.pos = new Float32Array(max * 3);
     this.vel = new Float32Array(max * 3);
     this.grav = new Float32Array(max);
@@ -68,17 +71,22 @@ class Pool {
     this.geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
 
     const mat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: map }, uSoft: { value: softness } },
+      uniforms: { map: { value: map }, uSoft: { value: softness }, uScale: PARTICLE_SCALE },
       transparent: true,
       depthWrite: false,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       vertexShader: `
         attribute float aSize; attribute float aAlpha; attribute float aRot; attribute vec3 aColor;
+        uniform float uScale;
         varying float vAlpha; varying float vRot; varying vec3 vColor;
         void main(){
-          vAlpha = aAlpha; vRot = aRot; vColor = aColor;
+          vColor = aColor; vRot = aRot;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = aSize * (320.0 / max(-mv.z, 0.1));
+          float d = max(-mv.z, 0.05);
+          // aSize is in centimetres-ish (x0.02 m); fade sprites that get right
+          // up against the lens so they never blanket the screen.
+          gl_PointSize = min(aSize * 0.02 * uScale / d, 512.0);
+          vAlpha = aAlpha * smoothstep(0.35, 1.6, d);
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
@@ -152,9 +160,12 @@ class Pool {
       this.pos[i * 3] += this.vel[i * 3] * dt;
       this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
       this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
-      if (this.pos[i * 3 + 1] < 0.02) {
-        this.pos[i * 3 + 1] = 0.02;
+      const floor = this.ground(this.pos[i * 3], this.pos[i * 3 + 2]) + 0.02;
+      if (this.pos[i * 3 + 1] < floor) {
+        this.pos[i * 3 + 1] = floor;
         this.vel[i * 3 + 1] *= -0.3;
+        this.vel[i * 3] *= 0.6;
+        this.vel[i * 3 + 2] *= 0.6;
       }
       this.aRot[i] += this.spin[i] * dt;
       const u = Math.max(0, this.life[i] / this.ttl[i]);
@@ -175,11 +186,11 @@ export class Particles {
   private dustTimer = 0;
   private budget: number;
 
-  constructor(scene: THREE.Scene, quality: Quality = 'high') {
-    this.budget = quality === 'high' ? 1 : quality === 'med' ? 0.6 : 0.3;
-    const n = quality === 'high' ? 700 : quality === 'med' ? 420 : 220;
-    this.sparkPool = new Pool(scene, n, true, sparkTexture(), 1);
-    this.smokePool = new Pool(scene, Math.floor(n * 0.7), false, smokeTexture(), 1);
+  constructor(scene: THREE.Scene, quality: Quality = 'high', ground: (x: number, z: number) => number = () => 0) {
+    this.budget = quality === 'high' ? 1 : quality === 'med' ? 0.7 : 0.4;
+    const n = quality === 'high' ? 900 : quality === 'med' ? 600 : 300;
+    this.sparkPool = new Pool(scene, n, true, sparkTexture(), 1, ground);
+    this.smokePool = new Pool(scene, Math.floor(n * 0.8), false, smokeTexture(), 1, ground);
   }
 
   private scaled(o: EmitOpts): EmitOpts {
@@ -194,9 +205,9 @@ export class Particles {
     this.smokePool.emit(p, this.scaled(o));
   }
 
-  sparks(p: Vec3): void {
-    this.emit(p, { count: 30, speed: 4.6, spread: 1.6, up: 1.6, gravity: 9, size: 16, ttl: 0.62, color: [1.0, 0.85, 0.5], spin: 6 });
-    this.emitSmoke(p, { count: 5, speed: 0.5, spread: 0.4, up: 0.7, gravity: -0.4, size: 26, ttl: 1.1, color: [0.5, 0.5, 0.52], grow: 1.4, drag: 1.6, spin: 1.2 });
+  sparks(p: Vec3, strength = 1): void {
+    this.emit(p, { count: Math.round(24 * strength), speed: 3.6 * strength, spread: 1.2, up: 1.4, gravity: 9, size: 9, ttl: 0.55, color: [1.0, 0.82, 0.45], spin: 6 });
+    this.emitSmoke(p, { count: Math.round(3 * strength), speed: 0.3, spread: 0.3, up: 0.5, gravity: -0.4, size: 16, ttl: 0.9, color: [0.55, 0.55, 0.58], grow: 1.4, drag: 1.6, spin: 1.2 });
   }
   sparkle(p: Vec3): void {
     this.emit(p, { count: 16, speed: 1.7, spread: 0.8, up: 1.2, gravity: 2, size: 13, ttl: 0.7, color: [1.0, 0.92, 0.6], spin: 4 });
@@ -204,8 +215,8 @@ export class Particles {
   burst(p: Vec3, color: [number, number, number]): void {
     this.emit(p, { count: 34, speed: 5.2, spread: 2.1, up: 2.2, gravity: 5, size: 19, ttl: 0.85, color, spin: 5 });
   }
-  exhaust(p: Vec3): void {
-    this.emitSmoke(p, { count: 2, speed: 0.35, spread: 0.35, up: 0.55, gravity: -0.35, size: 20, ttl: 1.0, color: [0.42, 0.44, 0.48], grow: 2.2, drag: 1.8, spin: 1.5 });
+  exhaust(p: Vec3, strength = 0.5): void {
+    this.emitSmoke(p, { count: 1, speed: 0.3, spread: 0.25, up: 0.35, gravity: -0.35, size: 10 + strength * 10, ttl: 0.7 + strength * 0.5, color: [0.5, 0.52, 0.56], grow: 2.2, drag: 1.8, spin: 1.5 });
   }
   /** Footstep / landing puff. `strength` 0..1+ scales the kick. */
   dust(p: Vec3, strength = 1): void {

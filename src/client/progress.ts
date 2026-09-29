@@ -9,6 +9,9 @@ export interface MissionRecord {
   bestTime?: number;
   bestIntegrity?: number;
   loreFound: boolean;
+  bestGrade?: string;
+  bestScore?: number;
+  lore?: string[];
 }
 
 export interface Progress {
@@ -18,7 +21,12 @@ export interface Progress {
 export interface MissionMeta {
   id: string;
   title: string;
+  /** Where / who, shown above the title on the contract card. */
+  client: string;
   blurb: string;
+  /** Rough play length, minutes. */
+  minutes: number;
+  hour: string;
   /** Mission that must be completed before this one unlocks. */
   requires?: string;
 }
@@ -26,19 +34,25 @@ export interface MissionMeta {
 /** The campaign, in order. */
 export const CAMPAIGN: MissionMeta[] = [
   {
-    id: 'garage',
-    title: 'The Garage',
-    blurb: 'Training bay. Learn to move, scavenge, build a vehicle and drive it. No way to fail.',
+    id: 'depot',
+    title: 'Orientation Day',
+    client: 'The Company · Depot 7',
+    blurb: 'Your first shift. Punch in, get your tools, and get the practice truck back on the road before the boss finishes his coffee. Nothing here can go wrong. Probably.',
+    minutes: 8,
+    hour: 'Morning',
   },
   {
-    id: 'mountains',
-    title: 'Summer Mountains',
-    blurb: "A client's 4×4 is rolling toward a cliff edge. Chock it, fix it, drive it down.",
-    requires: 'garage',
+    id: 'ridge',
+    title: 'The Ridge Job',
+    client: 'Private client · Kestrel Ridge',
+    blurb: 'A 4×4 abandoned at the summit overlook — and it just started rolling. Save it, scavenge the mountain for parts, and drive it down before the wolves come out.',
+    minutes: 22,
+    hour: 'Golden hour → dusk',
+    requires: 'depot',
   },
 ];
 
-const KEY = 'mech.progress.v1';
+const KEY = 'mech.progress.v2';
 
 const empty = (): Progress => ({ missions: {} });
 
@@ -81,12 +95,13 @@ export interface RunResult {
   bestTime: number;
   isNewBest: boolean;
   unlocked?: MissionMeta;
+  isBestGrade: boolean;
 }
 
 /** Persist a completed run and report what it earned. */
 export function completeMission(
   id: string,
-  opts: { time: number; integrity: number; loreFound: boolean },
+  opts: { time: number; integrity: number; loreFound: boolean; grade?: string; score?: number; lore?: string[] },
 ): RunResult {
   const p = loadProgress();
   const prev = recordOf(p, id);
@@ -98,6 +113,9 @@ export function completeMission(
     bestTime: best.best,
     bestIntegrity: Math.max(prev.bestIntegrity ?? 0, opts.integrity),
     loreFound: prev.loreFound || opts.loreFound,
+    bestGrade: (opts.score ?? -1) > (prev.bestScore ?? -1) ? opts.grade : prev.bestGrade,
+    bestScore: Math.max(prev.bestScore ?? -1, opts.score ?? -1),
+    lore: [...new Set([...(prev.lore ?? []), ...(opts.lore ?? [])])],
   };
   save(p);
 
@@ -113,6 +131,7 @@ export function completeMission(
     bestTime: best.best,
     isNewBest: best.isNew,
     unlocked,
+    isBestGrade: (opts.score ?? -1) > (prev.bestScore ?? -1),
   };
 }
 

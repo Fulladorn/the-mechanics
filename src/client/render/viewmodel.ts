@@ -1,233 +1,258 @@
 import * as THREE from 'three';
 import type { World } from '../../sim/world';
-import { ITEM_DEFS, type ItemKind } from '../../shared/types';
-import { variantById, type PartKind } from '../../sim/vehicle';
-import type { Settings } from '../settings';
-import { M, paint } from './materials';
-import { capsule, cyl, roundedBox } from './geo';
-import { makePart } from './vehicleMesh';
-import { makeTool } from './toolMesh';
+import { ITEM_DEFS, type ItemKind } from '../../sim/items';
+import { itemModel } from './itemModels';
+import { styl } from './stylized';
+import { capsule, cyl, mesh, rbox } from './shapes';
 
-// First-person hands, held tools and carried parts, plus the motion that sells
-// them: bob, sway lag behind the mouse, strafe lean, and a landing dip. All of
-// it hangs off a pivot parented to the camera.
+// First-person hands and whatever they're holding. Rendered in its own scene
+// on top of the world (so a carried wheel never clips into a wall) with lights
+// that mirror the world's sun and sky.
+//
+// Every verb has a body: reaching for pickups, ratcheting on a bolt, pumping
+// a jack, tipping a jerry can, winding up a throw.
 
-const mesh = (g: THREE.BufferGeometry, m: THREE.Material): THREE.Mesh => {
-  const x = new THREE.Mesh(g, m);
-  x.castShadow = false;
-  x.receiveShadow = false;
-  return x;
-};
-
-/** A gloved hand with actual fingers — the old version was two boxes. */
-function buildHand(sx: number): THREE.Group {
+function buildHand(side: -1 | 1): THREE.Group {
   const h = new THREE.Group();
-  const glove = M.fabric(0xe8a23c);
-  const cuffMat = paint({ color: 0x39414f, roughness: 0.75 });
-
-  const palm = mesh(roundedBox(0.15, 0.115, 0.17, 0.045), glove);
-  h.add(palm);
-
-  // four curled fingers + a thumb
+  const glove = styl({ color: 0xe0a24a, rough: 0.85, noise: 0.08, noiseScale: 0.05, rim: 0.3, noFog: true });
+  const dark = styl({ color: 0xb87a2c, rough: 0.8, noFog: true });
+  const sleeve = styl({ color: 0x2f4a6e, rough: 0.9, noFog: true });
+  h.add(mesh(rbox(0.15, 0.11, 0.17, 0.045), glove));
   for (let i = 0; i < 4; i++) {
     const f = new THREE.Group();
-    const seg1 = mesh(capsule(0.021, 0.05, 3, 6), glove);
-    seg1.rotation.x = Math.PI / 2;
-    f.add(seg1);
-    const seg2 = mesh(capsule(0.019, 0.042, 3, 6), glove);
-    seg2.rotation.x = Math.PI / 2.2;
-    seg2.position.set(0, -0.032, -0.055);
-    f.add(seg2);
+    const s1 = mesh(capsule(0.021, 0.05, 3, 6), glove);
+    s1.rotation.x = Math.PI / 2;
+    f.add(s1);
+    const s2 = mesh(capsule(0.019, 0.04, 3, 6), glove);
+    s2.rotation.x = Math.PI / 2.2;
+    s2.position.set(0, -0.03, -0.055);
+    f.add(s2);
     f.position.set(-0.048 + i * 0.032, 0.012, -0.088);
     h.add(f);
   }
   const thumb = mesh(capsule(0.024, 0.05, 3, 6), glove);
-  thumb.rotation.set(Math.PI / 2.4, 0, sx * 0.6);
-  thumb.position.set(sx * 0.072, -0.012, -0.045);
+  thumb.rotation.set(Math.PI / 2.4, 0, side * 0.6);
+  thumb.position.set(side * 0.072, -0.012, -0.045);
   h.add(thumb);
-
-  // knuckle pads + cuff
-  const pads = mesh(roundedBox(0.14, 0.035, 0.07, 0.016), paint({ color: 0xc07d1f, roughness: 0.7 }));
-  pads.position.set(0, 0.062, -0.062);
+  const pads = mesh(rbox(0.14, 0.035, 0.07, 0.016), dark);
+  pads.position.set(0, 0.06, -0.06);
   h.add(pads);
-  const cuff = mesh(cyl(0.078, 0.07, 0.12, 10), cuffMat);
+  const cuff = mesh(cyl(0.08, 0.075, 0.1, 12), dark);
   cuff.rotation.x = Math.PI / 2;
-  cuff.position.set(0, -0.01, 0.14);
+  cuff.position.set(0, -0.01, 0.12);
   h.add(cuff);
-  const band = mesh(cyl(0.082, 0.082, 0.025, 10), paint({ color: 0xffcf3f, roughness: 0.6 }));
-  band.rotation.x = Math.PI / 2;
-  band.position.set(0, -0.01, 0.1);
-  h.add(band);
-
-  // Idle hands sit low and wide, mostly out of frame. The previous rig put
-  // them dead centre at 0.15 m across, which swallowed the bottom third of the
-  // screen with two yellow slabs.
-  h.scale.setScalar(0.72);
-  h.position.set(sx * 0.38, -0.46, -0.44);
-  h.rotation.set(0.5, sx * -0.22, sx * 0.16);
+  const arm = mesh(cyl(0.085, 0.1, 0.5, 12), sleeve);
+  arm.rotation.x = Math.PI / 2;
+  arm.position.set(0, -0.02, 0.4);
+  h.add(arm);
+  h.traverse((o) => {
+    if (o instanceof THREE.Mesh) {
+      o.castShadow = false;
+      o.receiveShadow = false;
+      o.frustumCulled = false;
+    }
+  });
   return h;
 }
 
+const HOLD: Partial<Record<ItemKind, { pos: [number, number, number]; rot: [number, number, number]; scale: number }>> = {
+  wheel: { pos: [0, -0.5, -0.78], rot: [0.15, 0.2, Math.PI / 2], scale: 0.9 },
+  tire: { pos: [0, -0.5, -0.78], rot: [0.15, 0.2, Math.PI / 2], scale: 0.9 },
+  battery: { pos: [0, -0.38, -0.62], rot: [0.25, 0.3, 0], scale: 1 },
+  jack: { pos: [0.05, -0.42, -0.7], rot: [0.2, 0.3, 0], scale: 0.9 },
+  chock: { pos: [0.12, -0.33, -0.55], rot: [0.3, 0.6, 0], scale: 1 },
+  jerrycan: { pos: [0.12, -0.42, -0.6], rot: [0.1, 0.9, 0], scale: 1 },
+  coolant: { pos: [0.12, -0.34, -0.55], rot: [0.1, 0.4, 0], scale: 1 },
+  fuelHose: { pos: [0, -0.3, -0.55], rot: [0.3, 0.1, 0.1], scale: 1 },
+  radiatorHose: { pos: [0, -0.3, -0.55], rot: [0.3, 0.1, 0.1], scale: 1 },
+  winch: { pos: [0, -0.4, -0.65], rot: [0.2, 0.3, 0], scale: 0.9 },
+  lightbar: { pos: [0, -0.35, -0.7], rot: [0.2, 0.25, 0], scale: 0.8 },
+  crate: { pos: [0, -0.4, -0.7], rot: [0.15, 0.3, 0], scale: 0.9 },
+  fuse: { pos: [0.1, -0.28, -0.45], rot: [0.5, 0.3, 0], scale: 1.2 },
+};
+
 export class Viewmodel {
-  private pivot = new THREE.Group();
-  private hands = new THREE.Group();
-  private leftHand: THREE.Group;
-  private rightHand: THREE.Group;
-  private heldPart = new THREE.Group();
-  private tools = new Map<ItemKind, THREE.Object3D>();
+  readonly scene = new THREE.Scene();
+  readonly camera: THREE.PerspectiveCamera;
+  private rig = new THREE.Group();
+  private left: THREE.Group;
+  private right: THREE.Group;
+  private held = new THREE.Group();
   private heldKey = '';
+  private tool = new THREE.Group();
+  private toolKey = '';
+  private sun = new THREE.DirectionalLight(0xffffff, 2);
+  private hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+  readonly flashlight: THREE.SpotLight;
 
-  private bobT = 0;
-  private swayYaw = 0;
-  private lastYaw = 0;
-  private swayVel = 0;
-  private lean = 0;
+  private t = 0;
+  private sway = new THREE.Vector2();
+  private lastLook = new THREE.Vector2();
   private dip = 0;
-  private wasGrounded = true;
-  /** Counts down while an install/use animation plays. */
-  private punch = 0;
+  private reach = 0;
+  private swing = 0;
+  private wasGround = true;
+  private raise = 0;
 
-  constructor(camera: THREE.PerspectiveCamera) {
-    camera.add(this.pivot);
-
-    this.leftHand = buildHand(-1);
-    this.rightHand = buildHand(1);
-    this.hands.add(this.leftHand, this.rightHand);
-    this.pivot.add(this.hands);
-
-    this.heldPart.position.set(0, -0.46, -0.95);
-    this.heldPart.visible = false;
-    this.pivot.add(this.heldPart);
-
-    for (const kind of ['wrench', 'flashlight', 'medkit', 'flare'] as ItemKind[]) {
-      const tool = makeTool(kind);
-      if (!tool) continue;
-      tool.scale.setScalar(0.85);
-      tool.position.set(0.27, -0.29, -0.5);
-      tool.rotation.set(0.32, -0.3, 0.22);
-      tool.visible = false;
-      this.pivot.add(tool);
-      this.tools.set(kind, tool);
-    }
-
-    // Never let the viewmodel clip into geometry or cast odd shadows.
-    this.pivot.traverse((o) => {
-      o.renderOrder = 10;
-      if (o instanceof THREE.Mesh) {
-        o.castShadow = false;
-        o.receiveShadow = false;
-        o.frustumCulled = false;
-      }
-    });
+  constructor(aspect: number, fov: number) {
+    this.camera = new THREE.PerspectiveCamera(fov, aspect, 0.02, 10);
+    this.scene.add(this.camera, this.sun, this.hemi, this.sun.target);
+    this.sun.target.position.set(0, 0, -1);
+    this.camera.add(this.rig);
+    this.left = buildHand(-1);
+    this.right = buildHand(1);
+    this.rig.add(this.left, this.right, this.held, this.tool);
+    this.flashlight = new THREE.SpotLight(0xfff1d6, 0, 26, 0.42, 0.45, 1.3);
+    this.flashlight.castShadow = false;
   }
 
-  /** Trigger the "you just did a thing with your hands" punch animation. */
   bump(): void {
-    this.punch = 1;
+    this.reach = 1;
+  }
+  swingFx(): void {
+    this.swing = 1;
   }
 
-  update(dt: number, w: World, speed: number, yaw: number, settings: Settings): void {
-    const p = w.player;
-    const onFoot = p.mode === 'foot';
-    this.pivot.visible = onFoot;
-    if (!onFoot) return;
+  setFov(fov: number, aspect: number): void {
+    this.camera.fov = Math.min(fov, 70);
+    this.camera.aspect = aspect;
+    this.camera.updateProjectionMatrix();
+  }
 
-    // --- held content ---
-    const carry = p.carrying;
-    const cv = p.carryingVariant;
-    const key = carry && cv ? `${carry}|${cv}` : '';
-    if (key !== this.heldKey) {
-      this.heldKey = key;
-      while (this.heldPart.children.length) this.heldPart.remove(this.heldPart.children[0]);
-      if (carry && cv) {
-        const variant = variantById(cv);
-        if (variant) {
-          const m = makePart(carry as PartKind, variant, w.vehicle.bodyColor);
-          m.traverse((o) => {
-            if (o instanceof THREE.SpotLight) o.intensity = 0;
-            if (o instanceof THREE.Mesh) {
-              o.castShadow = false;
-              o.frustumCulled = false;
-            }
-          });
-          // Big parts need scaling down hard or they fill the screen.
-          m.scale.setScalar(ITEM_DEFS[carry].heavy ? (carry === 'body' ? 0.3 : 0.5) : 0.55);
-          this.heldPart.add(m);
-        }
+  /** Mirror the world's light onto the hands (dimmed when standing in shade). */
+  light(sun: THREE.DirectionalLight, hemi: THREE.HemisphereLight, env: THREE.Texture | null, shade: number, camQuat: THREE.Quaternion, keyDir: THREE.Vector3): void {
+    this.sun.color.copy(sun.color);
+    this.sun.intensity = sun.intensity * (1 - shade * 0.85);
+    this.hemi.color.copy(hemi.color);
+    this.hemi.groundColor.copy(hemi.groundColor);
+    this.hemi.intensity = hemi.intensity;
+    this.scene.environment = env;
+    this.scene.environmentIntensity = 0.5;
+    // light direction in camera space so the hands are lit like the world
+    const d = keyDir.clone().applyQuaternion(camQuat.clone().invert());
+    this.sun.position.copy(d).multiplyScalar(5);
+    this.sun.target.position.set(0, 0, 0);
+  }
+
+  update(dt: number, w: World, yaw: number, pitch: number, bob: boolean, visible: boolean): void {
+    this.rig.visible = visible;
+    if (!visible) return;
+    const p = w.player;
+    this.t += dt;
+
+    // --- what's in hand -----------------------------------------------------------
+    const heldItem = w.items.get(p.held);
+    const hk = heldItem ? `${heldItem.id}:${heldItem.cond}:${Math.round(heldItem.fill * 5)}` : '';
+    if (hk !== this.heldKey) {
+      this.heldKey = hk;
+      this.held.clear();
+      if (heldItem) {
+        const m = itemModel(heldItem);
+        const hold = HOLD[heldItem.kind] ?? { pos: [0, -0.35, -0.6], rot: [0.2, 0.3, 0], scale: 1 };
+        m.position.set(...hold.pos);
+        m.rotation.set(...hold.rot);
+        m.scale.setScalar(hold.scale);
+        m.traverse((o) => {
+          if (o instanceof THREE.Mesh) {
+            o.castShadow = false;
+            o.frustumCulled = false;
+          }
+        });
+        this.held.add(m);
+        this.reach = 1;
       }
     }
-    const carrying = !!key;
-    this.heldPart.visible = carrying;
-
-    const sel = p.hotbar[p.selSlot];
-    let toolOut = false;
-    for (const [kind, o] of this.tools) {
-      const on = !carrying && sel === kind;
-      o.visible = on;
-      toolOut ||= on;
+    const tool = heldItem ? null : w.selectedTool();
+    const tk = tool ?? '';
+    if (tk !== this.toolKey) {
+      this.toolKey = tk;
+      this.tool.clear();
+      if (tool) {
+        const m = itemModel({ kind: tool, cond: 'good', fill: 0 });
+        m.traverse((o) => {
+          if (o instanceof THREE.Mesh) o.frustumCulled = false;
+        });
+        this.tool.add(m);
+        this.raise = 0;
+      }
     }
 
-    // Both hands come up to grip a carried part; otherwise they rest low and
-    // the right hand only rises when it's holding a tool.
-    this.rightHand.visible = !toolOut || carrying;
-    this.leftHand.position.set(carrying ? -0.27 : -0.38, carrying ? -0.4 : -0.46, carrying ? -0.62 : -0.44);
-    this.rightHand.position.set(
-      carrying ? 0.27 : toolOut ? 0.3 : 0.38,
-      carrying ? -0.4 : toolOut ? -0.36 : -0.46,
-      carrying ? -0.62 : toolOut ? -0.5 : -0.44,
-    );
+    // --- pose -----------------------------------------------------------------------
+    const heavy = heldItem ? ITEM_DEFS[heldItem.kind].heavy : false;
+    const f = w.focus;
+    const working = !!f && !f.disabled && w.holdProgress > 0;
+    const onBolt = working && (f!.verb === 'loosen' || f!.verb === 'torque');
+    const pumping = working && f!.verb === 'hold';
+    const pouring = working && f!.verb === 'pour';
+    this.raise = Math.min(1, this.raise + dt * 4);
 
-    // --- motion ---
-    const amp = settings.accessibility.headbob ? 1 : 0.32;
-    const sp = Math.min(speed / 8, 1.4);
-    this.bobT += dt * (3.4 + speed * 1.5);
+    // sway lag from mouse, bob from gait
+    const dy = yaw - this.lastLook.x;
+    const dp = pitch - this.lastLook.y;
+    this.lastLook.set(yaw, pitch);
+    this.sway.x += (THREE.MathUtils.clamp(dy * 2.4, -0.3, 0.3) - this.sway.x) * Math.min(1, dt * 12);
+    this.sway.y += (THREE.MathUtils.clamp(dp * 2.4, -0.3, 0.3) - this.sway.y) * Math.min(1, dt * 12);
+    const speed = Math.hypot(p.vel.x, p.vel.z);
+    const gait = p.onGround ? Math.min(1, speed / 6) : 0;
+    const b = bob ? 1 : 0.35;
+    const bobY = Math.sin(this.t * (6 + speed)) * 0.012 * gait * b * (heavy ? 1.6 : 1);
+    const bobX = Math.cos(this.t * (3 + speed * 0.5)) * 0.016 * gait * b;
+    if (!this.wasGround && p.onGround) this.dip = Math.min(1, p.landSpeed / 10 + 0.3);
+    this.wasGround = p.onGround;
+    this.dip *= Math.exp(-dt * 8);
+    this.reach = Math.max(0, this.reach - dt * 3.5);
+    this.swing = Math.max(0, this.swing - dt * 3);
+    const reach = Math.sin(this.reach * Math.PI);
+    const charge = Math.min(1, w.dropCharge / 0.8);
 
-    // Figure-8: horizontal at half the vertical rate reads as a real gait.
-    const bobY = Math.sin(this.bobT * 2) * 0.011 * sp * amp;
-    const bobX = Math.cos(this.bobT) * 0.014 * sp * amp;
+    this.rig.position.set(bobX - this.sway.x * 0.06, bobY - this.dip * 0.06 - this.sway.y * 0.04 - (heavy ? 0.02 : 0), charge * 0.12 - reach * 0.08);
+    this.rig.rotation.set(this.sway.y * 0.1 - this.dip * 0.06, this.sway.x * 0.14, this.sway.x * 0.08);
 
-    // sway: the viewmodel lags behind fast mouse movement
-    let dYaw = yaw - this.lastYaw;
-    if (dYaw > Math.PI) dYaw -= Math.PI * 2;
-    if (dYaw < -Math.PI) dYaw += Math.PI * 2;
-    this.lastYaw = yaw;
-    this.swayVel += (dYaw * 2.2 - this.swayVel) * Math.min(1, dt * 14);
-    this.swayVel *= 0.86;
-    this.swayYaw += (this.swayVel - this.swayYaw) * Math.min(1, dt * 10);
-
-    // strafe lean from the player's own velocity, projected onto their right
-    const rx = Math.cos(yaw);
-    const rz = -Math.sin(yaw);
-    const strafe = (p.vel.x * rx + p.vel.z * rz) / 8;
-    this.lean += (THREE.MathUtils.clamp(strafe, -1, 1) - this.lean) * Math.min(1, dt * 6);
-
-    // landing dip
-    if (!this.wasGrounded && p.onGround) this.dip = 1;
-    this.wasGrounded = p.onGround;
-    this.dip *= Math.exp(-dt * 9);
-    if (!p.onGround) this.dip = Math.max(this.dip, -0.35);
-
-    this.punch = Math.max(0, this.punch - dt * 4);
-    const punchEase = Math.sin(this.punch * Math.PI) ** 2;
-
-    this.pivot.position.set(
-      bobX - this.swayYaw * 0.05 - this.lean * 0.03,
-      bobY - this.dip * 0.07 - punchEase * 0.02,
-      punchEase * 0.09,
-    );
-    this.pivot.rotation.set(
-      -this.dip * 0.09 + punchEase * 0.16,
-      -this.swayYaw * 0.12,
-      this.lean * 0.05 + this.swayYaw * 0.06,
-    );
-
-    // the carried part wobbles under its own weight — the "wonky physics" beat
-    if (carrying) {
-      this.heldPart.rotation.set(
-        Math.sin(this.bobT * 0.9) * 0.05 - this.dip * 0.2,
-        Math.sin(this.bobT * 0.6) * 0.07 - this.swayYaw * 0.3,
-        Math.cos(this.bobT * 0.75) * 0.06 + this.lean * 0.12,
-      );
+    const L = this.left;
+    const R = this.right;
+    if (heldItem) {
+      // two hands on the part; heavy parts sag and sway
+      const hold = HOLD[heldItem.kind] ?? { pos: [0, -0.35, -0.6] as [number, number, number], rot: [0, 0, 0], scale: 1 };
+      const [hx, hy, hz] = hold.pos;
+      const wobble = heavy ? Math.sin(this.t * 2.1) * 0.02 : 0;
+      const pour = pouring ? 1 : 0;
+      this.held.position.set(0, wobble - charge * 0.05, charge * 0.15);
+      this.held.rotation.set(-pour * 0.7 - charge * 0.2, 0, pour * 0.2);
+      const spread = heldItem.kind === 'wheel' || heldItem.kind === 'tire' ? 0.3 : heavy ? 0.22 : 0.14;
+      L.position.set(hx - spread, hy + 0.02 + wobble, hz + 0.1 + charge * 0.15);
+      R.position.set(hx + spread, hy + 0.02 + wobble, hz + 0.1 + charge * 0.15);
+      L.rotation.set(0.3, 0.5, 0.9);
+      R.rotation.set(0.3, -0.5, -0.9);
+      L.visible = R.visible = true;
+      this.tool.visible = false;
+    } else {
+      this.tool.visible = !!tool;
+      // Empty hands stay out of frame; they come up to reach, pump and work.
+      const act = Math.max(reach, pumping ? 1 : 0);
+      L.position.set(-0.36 + reach * 0.12, -0.62 + act * 0.3, -0.42 - reach * 0.22);
+      L.rotation.set(0.5 - reach * 0.4, 0.22, -0.16);
+      L.visible = act > 0.02 || pumping;
+      if (tool) {
+        R.visible = true;
+        const ratchet = onBolt ? Math.sin(this.t * (f!.verb === 'torque' ? 14 : 22)) * 0.35 : 0;
+        const up = (1 - this.raise) * -0.3;
+        const sw = Math.sin(this.swing * Math.PI);
+        this.tool.position.set(0.24 - (onBolt ? 0.08 : 0) - sw * 0.2, -0.3 + up + (onBolt ? 0.06 : 0), -0.52 - (onBolt ? 0.12 : 0) - sw * 0.15);
+        this.tool.rotation.set(0.3 + ratchet * 0.3 + sw * 1.2, -0.35 + (tool === 'wrench' ? -Math.PI / 2 : 0) + ratchet, 0.2 - sw * 0.6);
+        R.position.set(this.tool.position.x + 0.06, this.tool.position.y - 0.06, this.tool.position.z + 0.12);
+        R.rotation.set(0.35 + ratchet * 0.3, -0.3, 0.1);
+      } else {
+        const act = Math.max(reach, pumping ? 1 : 0);
+        R.visible = act > 0.02;
+        const pump = pumping ? Math.abs(Math.sin(this.t * 7)) * 0.08 : 0;
+        R.position.set(0.36 - reach * 0.1 - (pumping ? 0.12 : 0), -0.62 + act * 0.3 - pump, -0.42 - reach * 0.2 - (pumping ? 0.15 : 0));
+        R.rotation.set(0.5 - reach * 0.4, -0.22, 0.16);
+        if (pumping) L.position.set(-0.24, -0.44 - pump, -0.57);
+      }
     }
+
+    // flashlight beam from the tool (or the chest when carrying)
+    const torch = p.flashlight;
+    this.flashlight.intensity = torch ? 38 : 0;
   }
 }

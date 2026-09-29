@@ -1,5 +1,5 @@
-// Rebindable action set. One physical key (KeyboardEvent.code) per action; the
-// input layer reverse-maps code -> action so keys can be remapped at runtime.
+// Rebindable action set. One physical key (KeyboardEvent.code, or MouseN) per
+// action; the input layer reverse-maps code -> action at runtime.
 
 export type Action =
   | 'fwd'
@@ -10,17 +10,20 @@ export type Action =
   | 'crouch'
   | 'sprint'
   | 'interact'
-  | 'drop'
-  | 'attack'
-  | 'block'
   | 'use'
+  | 'block'
+  | 'drop'
+  | 'flashlight'
+  | 'jobsheet'
+  | 'camera'
+  | 'lights'
+  | 'horn'
+  | 'unflip'
   | 'pause'
   | 'slot1'
   | 'slot2'
   | 'slot3'
-  | 'slot4'
-  | 'slot5'
-  | 'slot6';
+  | 'slot4';
 
 export const DEFAULT_BINDS: Record<Action, string> = {
   fwd: 'KeyW',
@@ -31,39 +34,45 @@ export const DEFAULT_BINDS: Record<Action, string> = {
   crouch: 'ControlLeft',
   sprint: 'ShiftLeft',
   interact: 'KeyE',
-  drop: 'KeyG',
-  attack: 'Mouse0',
+  use: 'Mouse0',
   block: 'Mouse2',
-  use: 'KeyF',
+  drop: 'KeyG',
+  flashlight: 'KeyF',
+  jobsheet: 'Tab',
+  camera: 'KeyV',
+  lights: 'KeyL',
+  horn: 'KeyH',
+  unflip: 'KeyR',
   pause: 'Escape',
   slot1: 'Digit1',
   slot2: 'Digit2',
   slot3: 'Digit3',
   slot4: 'Digit4',
-  slot5: 'Digit5',
-  slot6: 'Digit6',
 };
 
 export const ACTION_LABELS: Record<Action, string> = {
-  fwd: 'Move Forward',
-  back: 'Move Back',
-  left: 'Strafe Left',
-  right: 'Strafe Right',
-  jump: 'Jump',
+  fwd: 'Move forward / Accelerate',
+  back: 'Move back / Brake',
+  left: 'Strafe left / Steer left',
+  right: 'Strafe right / Steer right',
+  jump: 'Jump / Handbrake',
   crouch: 'Crouch',
   sprint: 'Sprint',
-  interact: 'Interact / Pick up',
-  drop: 'Drop carried',
-  attack: 'Swing / Use',
-  block: 'Block / Brace',
-  use: 'Use selected item',
+  interact: 'Interact (tap or hold)',
+  use: 'Use tool (hold on bolts)',
+  block: 'Block',
+  drop: 'Drop (hold to throw)',
+  flashlight: 'Flashlight',
+  jobsheet: 'Job sheet',
+  camera: 'Vehicle camera',
+  lights: 'Headlights',
+  horn: 'Horn',
+  unflip: 'Flip vehicle upright',
   pause: 'Pause',
   slot1: 'Toolbelt 1',
   slot2: 'Toolbelt 2',
   slot3: 'Toolbelt 3',
   slot4: 'Toolbelt 4',
-  slot5: 'Toolbelt 5',
-  slot6: 'Toolbelt 6',
 };
 
 const SPECIAL: Record<string, string> = {
@@ -71,11 +80,11 @@ const SPECIAL: Record<string, string> = {
   Mouse1: 'MMB',
   Mouse2: 'RMB',
   Space: 'Space',
-  ControlLeft: 'L-Ctrl',
+  ControlLeft: 'Ctrl',
   ControlRight: 'R-Ctrl',
-  ShiftLeft: 'L-Shift',
+  ShiftLeft: 'Shift',
   ShiftRight: 'R-Shift',
-  AltLeft: 'L-Alt',
+  AltLeft: 'Alt',
   AltRight: 'R-Alt',
   Escape: 'Esc',
   ArrowUp: '↑',
@@ -86,7 +95,7 @@ const SPECIAL: Record<string, string> = {
   Enter: 'Enter',
 };
 
-/** Pretty label for a KeyboardEvent.code (for the rebinding UI / legend). */
+/** Pretty label for a KeyboardEvent.code (for the rebinding UI / prompts). */
 export function bindLabel(code: string): string {
   if (!code) return '—';
   if (SPECIAL[code]) return SPECIAL[code];

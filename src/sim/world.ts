@@ -1,747 +1,1176 @@
 import type { Vec3 } from '../shared/math';
-import { clamp, dist2D, yawForward, vnorm } from '../shared/math';
-import {
-  CHECKPOINT_RADIUS,
-  EYE_DROP,
-  GATE_SPEED,
-  INTERACT_CONE,
-  INTERACT_RANGE,
-  STAND_HEIGHT,
-} from '../shared/constants';
-import {
-  ITEM_DEFS,
-  type Command,
-  type Intent,
-  type InteractTarget,
-  type ItemKind,
-  type SimEvent,
-  type WorldItem,
-} from '../shared/types';
-import type { Box, GroundFn } from './collision';
-import { horizontalSpeed, stepMovement, type Mover } from './movement';
-import { makeKart, stepKart, type KartState } from './kart';
-import { makeFuseGrid, type FusePuzzle } from './puzzles/fuseGrid';
-import { makeBoltTorque, type BoltPuzzle } from './puzzles/boltTorque';
-import { makeValveBalance, type ValvePuzzle } from './puzzles/valveBalance';
-import {
-  deriveStats,
-  filledSockets,
-  installPart,
-  isDrivable,
-  makeVehicle,
-  openSockets,
-  repairSocket,
-  socketById,
-  uninstallPart,
-  variantById,
-  type PartKind,
-  type PuzzleKind,
-  type Vehicle,
-} from './vehicle';
-import { Objectives } from './objectives';
+import { clamp, dist2D, qYaw, vnorm, yawForward } from '../shared/math';
+import type { BeatDef, DoorDef, LevelDef, MachinePlacement, StationDef } from '../content/levels/types';
+import type { FailReason, SimEvent } from './events';
+import { DEFAULT_HAZARDS, applyDamage, fallDamage, heal, makeVitals, stepHazards, type HazardDef, type Vitals } from './hazards';
+import { INTERACT_REACH, pickFocus, type Interactable } from './interact';
+import { ITEM_DEFS, ItemManager, itemLabel, type ItemKind, type ItemSpawn, type WorldItem } from './items';
+import { Machine, type MachineCtx } from './machine';
+import { G, Physics, RAPIER, initRapier, type RCollider } from './physics';
+import { BELT_SLOTS, Player } from './player';
 import { Terrain } from './terrain';
-import {
-  DEFAULT_HAZARDS,
-  applyDamage,
-  fallDamage,
-  heal,
-  makeVitals,
-  stepHazards,
-  type HazardDef,
-  type Vitals,
-} from './hazards';
+import { Vehicle } from './vehicle';
 import { WOLF, makeWolf, stepWolf, strikeWolf, type CombatEvent, type Wolf } from './combat';
-import { makeGarage } from '../content/levels/garage';
-import type { LevelDef } from '../content/levels/types';
 
-const PART_KINDS = new Set<string>([
-  'wheel', 'engine', 'battery', 'seat', 'body', 'bumper', 'headlights', 'spoiler',
-  'exhaust', 'fuel', 'brakes', 'coolant', 'winch', 'rooflight',
-]);
-const isPartKind = (k: string): k is PartKind => PART_KINDS.has(k);
+// The game world: one level's worth of physics, player, items, machines,
+// vehicles, wolves, hazards and the mission director. DOM-free — the browser
+// client and the headless tests drive it identically.
 
-const PAINT_PALETTE = [0xe5484d, 0x2f7fd1, 0x39b36b, 0xf1c40f, 0x8e44ad, 0xe67e22, 0x16a085, 0xdfe3ea];
-
-export interface Player extends Mover {
-  mode: 'foot' | 'kart';
-  carrying: ItemKind | null;
-  carryingVariant: string | null;
-  /** Which world item is in hand, so dropping returns the right instance. */
-  carryingItemId: number | null;
-  hotbar: (ItemKind | null)[];
-  selSlot: number;
-  topSpeed: number;
-  movedDist: number;
-  blocking: boolean;
-  /** Seconds until the player can swing again. */
-  attackCooldown: number;
+export interface Intent {
+  fwd: boolean;
+  back: boolean;
+  left: boolean;
+  right: boolean;
+  jump: boolean;
+  crouch: boolean;
+  sprint: boolean;
+  yaw: number;
+  pitch: number;
+  /** E held. */
+  interact: boolean;
+  /** LMB held. */
+  use: boolean;
+  /** RMB held. */
+  block: boolean;
+  /** G held (tap drops, hold charges a throw). */
+  drop: boolean;
 }
 
-/** A repair puzzle the player currently has open. */
-export interface ActivePuzzle {
-  socketId: string;
-  kind: PuzzleKind;
-  fuse?: FusePuzzle;
-  bolt?: BoltPuzzle;
-  valve?: ValvePuzzle;
+export const makeIntent = (): Intent => ({
+  fwd: false,
+  back: false,
+  left: false,
+  right: false,
+  jump: false,
+  crouch: false,
+  sprint: false,
+  yaw: 0,
+  pitch: 0,
+  interact: false,
+  use: false,
+  block: false,
+  drop: false,
+});
+
+export type Command =
+  | { t: 'slot'; n: number }
+  | { t: 'cycle'; dir: number }
+  | { t: 'flashlight' }
+  | { t: 'lights' }
+  | { t: 'horn' }
+  | { t: 'unflip' }
+  | { t: 'fuse'; index: number }
+  | { t: 'valve'; index: number; value: number }
+  | { t: 'commitValves' }
+  | { t: 'closePanel' };
+
+interface Door {
+  def: DoorDef;
+  collider: RCollider;
+  open: boolean;
+  /** 0..1 swing, for the renderer. */
+  swing: number;
+}
+
+interface Flare {
+  pos: Vec3;
+  ttl: number;
+}
+
+/** How many things fit on an ATV's cargo rack. */
+export const RACK_MAX = 4;
+
+export interface WorldOpts {
+  /** Accessibility: wider torque bands. */
+  assist?: boolean;
 }
 
 export class World {
-  level: LevelDef;
-  terrain?: Terrain;
-  player: Player;
-  vitals: Vitals;
-  items: WorldItem[];
-  kart: KartState;
-  vehicle: Vehicle;
-  wolves: Wolf[] = [];
-  objectives: Objectives;
-  lorePuzzle: FusePuzzle;
-  activePuzzle: ActivePuzzle | null = null;
-  loreFound = false;
-  gateOpen = false;
-  cpIndex = 0;
+  readonly terrain: Terrain;
+  readonly phys: Physics;
+  readonly items: ItemManager;
+  readonly player: Player;
+  readonly vitals: Vitals;
+  readonly machines = new Map<string, Machine>();
+  readonly vehicles = new Map<string, Vehicle>();
+  readonly placements = new Map<string, MachinePlacement>();
+  readonly doors = new Map<string, Door>();
+  readonly wolves: Wolf[] = [];
+  private wolfAfter = new Map<number, string>();
+  /** Colliders switched on (or off) by a flag. */
+  private gated: { c: RCollider; flag: string; on: boolean }[] = [];
+  /** Last checkpoint beat reached. */
+  checkpoint: string | null = null;
+  readonly flags = new Set<string>();
+  readonly lore = new Set<string>();
+  flares: Flare[] = [];
   events: SimEvent[] = [];
+
   elapsed = 0;
-  won = false;
-  failed: 'downed' | 'vehicle' | 'creep' | null = null;
-  /** Distance the unstabilised vehicle has crept toward the edge. */
-  creepDist = 0;
-  chocked = false;
+  hour: number;
+  private hourTarget: number | null = null;
+  beat = 0;
+  private beatStarted = false;
+  beatTime = 0;
+  private hintsFired = new Set<string>();
+  private triggersFired = new Set<string>();
+  ended: 'won' | 'failed' | null = null;
+  failReason: FailReason | null = null;
+  damageTaken = 0;
+
+  /** What the crosshair is on (recomputed every step). */
+  focus: Interactable | null = null;
+  /** Progress of the current hold (E or LMB), 0..1. */
+  holdProgress = 0;
+  private holdId: string | null = null;
+  private holdLatch = false;
+  /** After a loosen completes, LMB must be let go before it does anything else. */
+  private useLatch = false;
+  private torquing: Interactable | null = null;
+  private prev: Intent = makeIntent();
+  dropCharge = 0;
+  /** Open puzzle panel. */
+  panel: { machine: string; panel: string } | null = null;
+  swingCooldown = 0;
   private hazardDef: Required<HazardDef>;
-  private prevFallSpeed = 0;
-  private nextItemId = 1;
+  private opts: WorldOpts;
+  readonly ctx: MachineCtx;
 
-  constructor(level: LevelDef = makeGarage()) {
-    this.level = level;
-    this.terrain = level.terrain ? new Terrain(level.terrain) : undefined;
+  static async create(level: LevelDef, opts: WorldOpts = {}): Promise<World> {
+    await initRapier();
+    return new World(level, opts);
+  }
+
+  private constructor(
+    readonly level: LevelDef,
+    opts: WorldOpts,
+  ) {
+    this.opts = opts;
+    this.hour = level.hour;
     this.hazardDef = { ...DEFAULT_HAZARDS, ...(level.hazards ?? {}) };
-
-    const spawnY = this.groundHeight(level.spawn.x, level.spawn.z);
-    this.player = {
-      pos: { x: level.spawn.x, y: Math.max(level.spawn.y, spawnY), z: level.spawn.z },
-      vel: { x: 0, y: 0, z: 0 },
-      yaw: level.spawnYaw,
-      pitch: 0,
-      onGround: true,
-      crouching: false,
-      height: STAND_HEIGHT,
-      mode: 'foot',
-      carrying: null,
-      carryingVariant: null,
-      carryingItemId: null,
-      hotbar: [null, null, null, null, null, null],
-      selSlot: 0,
-      topSpeed: 0,
-      movedDist: 0,
-      blocking: false,
-      attackCooldown: 0,
-    };
+    this.terrain = Terrain.for(level.terrain);
+    this.phys = new Physics();
+    this.phys.addTerrain(this.terrain);
+    for (const s of level.statics) {
+      const c = this.phys.addStatic(s);
+      if (s.flag) {
+        c.setEnabled(false);
+        this.gated.push({ c, flag: s.flag, on: true });
+      }
+      if (s.unflag) this.gated.push({ c, flag: s.unflag, on: false });
+    }
+    this.items = new ItemManager(this.phys);
     this.vitals = makeVitals();
+    this.player = new Player(this.phys, level.spawn.pos, level.spawn.yaw);
 
-    this.items = level.items.map((sp) => ({
-      id: this.nextItemId++,
-      kind: sp.kind,
-      pos: { ...sp.pos },
-      picked: false,
-      variantId: sp.variantId,
-      lockedUntil: sp.lockedUntil,
-    }));
+    this.ctx = {
+      items: this.items,
+      held: () => this.items.get(this.player.held),
+      hasTool: (k) => this.hasItem(k),
+      takeHeld: () => {
+        const it = this.items.get(this.player.held);
+        this.player.held = null;
+        return it;
+      },
+      giveHands: (it) => this.giveHands(it),
+      emit: (e) => this.events.push(e),
+      hurt: (n, cause) => this.hurt(n, cause),
+      openPanel: (m, id) => this.openPanel(m, id),
+      flag: (n) => this.flags.has(n),
+      get assist() {
+        return !!opts.assist;
+      },
+    };
 
-    this.kart = makeKart(
-      { ...level.vehicleStart, y: this.groundHeight(level.vehicleStart.x, level.vehicleStart.z) },
-      level.vehicleYaw,
-    );
-    this.vehicle = makeVehicle(level.vehicleSockets);
-    if (level.vehicleColor !== undefined) this.vehicle.bodyColor = level.vehicleColor;
-    this.objectives = new Objectives(level.objectives);
-    this.lorePuzzle = makeFuseGrid(level.puzzleSeed + 2, 3);
-
-    (level.wolves ?? []).forEach((p, i) => {
-      const pos = { ...p, y: this.groundHeight(p.x, p.z) };
-      this.wolves.push(makeWolf(i + 1, pos, level.puzzleSeed));
+    for (const pl of level.machines) this.addMachine(pl);
+    for (const s of level.items) if (!s.mounted) this.items.spawn(s);
+    for (const d of level.doors ?? []) this.addDoor(d);
+    (level.wolves ?? []).forEach((w, i) => {
+      const pos = { ...w.pos, y: this.terrain.heightAt(w.pos.x, w.pos.z) };
+      const wolf = makeWolf(i + 1, pos, level.terrain.seed);
+      this.wolves.push(wolf);
+      if (w.after) this.wolfAfter.set(wolf.id, w.after);
     });
   }
 
-  // --- geometry helpers -----------------------------------------------------
-
-  /** Ground sampler for movement/vehicle; flat at y=0 without terrain. */
-  private ground: GroundFn = (x, z) => this.groundHeight(x, z);
-
-  groundHeight(x: number, z: number): number {
-    return this.terrain ? this.terrain.heightAt(x, z) : 0;
+  private addMachine(pl: MachinePlacement): void {
+    const m = new Machine(pl.def, pl.key, pl.pos, qYaw(pl.yaw));
+    for (const [slot, spec] of Object.entries(pl.mounts ?? {})) {
+      const it = this.items.spawn({ ...spec, mounted: true });
+      m.mount(slot, it, spec.bolts ?? 'tight');
+    }
+    for (const id of pl.terminalsOff ?? []) m.state.terminals[id] = { pos: false, neg: false };
+    this.machines.set(pl.key, m);
+    this.placements.set(pl.key, pl);
+    if (pl.vehicle) {
+      const v = new Vehicle(pl.vehicle, pl.key, this.phys, pl.pos, pl.yaw, m);
+      this.vehicles.set(pl.key, v);
+    }
   }
 
-  private groundFn(): GroundFn | undefined {
-    return this.terrain ? this.ground : undefined;
+  private addDoor(d: DoorDef): void {
+    const cx = d.hinge.x + Math.cos(d.yaw) * (d.width / 2);
+    const cz = d.hinge.z - Math.sin(d.yaw) * (d.width / 2);
+    const collider = this.phys.addStatic({
+      shape: 'box',
+      pos: { x: cx, y: d.hinge.y + d.height / 2, z: cz },
+      size: { x: d.width / 2, y: d.height / 2, z: 0.05 },
+      yaw: d.yaw,
+      surface: 'wood',
+      owner: `door:${d.id}`,
+    });
+    const open = !!d.open;
+    collider.setEnabled(!open);
+    this.doors.set(d.id, { def: d, collider, open, swing: open ? 1 : 0 });
   }
 
-  eyePos(): Vec3 {
+  // --- content API --------------------------------------------------------------
+
+  flag(name: string): boolean {
+    return this.flags.has(name);
+  }
+
+  setFlag(name: string): void {
+    if (this.flags.has(name)) return;
+    this.flags.add(name);
+    this.items.reveal(name);
+    for (const g of this.gated) if (g.flag === name) g.c.setEnabled(g.on);
+    this.events.push({ t: 'flag', name });
+  }
+
+  say(line: string, who = 'Dispatch', priority = 1): void {
+    if (line) this.events.push({ t: 'say', line, who, priority });
+  }
+
+  stamp(text: string, sub?: string, tone: 'good' | 'warn' | 'bad' = 'good'): void {
+    this.events.push({ t: 'stamp', text, sub, tone });
+  }
+
+  toast(text: string): void {
+    this.events.push({ t: 'toast', text });
+  }
+
+  sfx(name: string, pos?: Vec3, vol?: number): void {
+    this.events.push({ t: 'sfx', name, pos, vol });
+  }
+
+  machine(key: string): Machine {
+    const m = this.machines.get(key);
+    if (!m) throw new Error(`no machine ${key}`);
+    return m;
+  }
+
+  vehicle(key: string): Vehicle {
+    const v = this.vehicles.get(key);
+    if (!v) throw new Error(`no vehicle ${key}`);
+    return v;
+  }
+
+  systemOk(machine: string, system: string): boolean {
+    return this.machine(machine).systemOk(system, this.items);
+  }
+
+  /** Player (or their vehicle) within r metres of p (xz). */
+  near(p: Vec3, r: number): boolean {
+    return dist2D(this.playerPos(), p) <= r;
+  }
+
+  playerPos(): Vec3 {
+    if (this.player.mode === 'drive' && this.player.vehicle) return this.vehicle(this.player.vehicle).pos;
+    return this.player.pos;
+  }
+
+  spawnItem(s: ItemSpawn): WorldItem {
+    return this.items.spawn(s);
+  }
+
+  /** In hands, on the belt or in a pocket. */
+  hasItem(kind: ItemKind, tag?: string): boolean {
     const p = this.player;
-    return { x: p.pos.x, y: p.pos.y + p.height - EYE_DROP, z: p.pos.z };
+    if (kind === 'key') return p.pockets.some((k) => k.kind === 'key' && (!tag || k.tag === tag));
+    const held = this.items.get(p.held);
+    if (held?.kind === kind) return true;
+    return p.belt.some((id) => this.items.get(id)?.kind === kind);
   }
 
-  /** World position of a chassis socket (chassis sits at the vehicle start). */
-  private socketWorldPos(anchor: Vec3): Vec3 {
-    const o = this.kart.pos;
-    return { x: o.x + anchor.x, y: this.kart.pos.y - this.kart.half.y + anchor.y, z: o.z + anchor.z };
-  }
-
-  /** Walls/structures + the closed gate. Used for the vehicle (never itself). */
-  staticBoxes(): Box[] {
-    const boxes: Box[] = this.level.solids.map((s) => s.box);
-    if (this.level.gate && !this.gateOpen) boxes.push(this.level.gate);
-    return boxes;
-  }
-
-  /** Static geometry plus the parked vehicle (solid while you're on foot). */
-  playerBoxes(): Box[] {
-    const boxes = this.staticBoxes();
-    if (this.player.mode === 'foot') {
-      boxes.push({ center: this.kart.pos, half: this.kart.half });
-    }
-    return boxes;
-  }
-
-  /** Items that exist in the world right now (respecting unlock gating). */
-  activeItems(): WorldItem[] {
-    return this.items.filter((i) => !i.lockedUntil || this.objectives.isDone(i.lockedUntil));
-  }
-
-  // --- step -----------------------------------------------------------------
-
-  step(intent: Intent, dt: number): void {
-    if (this.won || this.failed) return;
-    this.elapsed += dt;
+  /** In hand, on the belt, or strapped to a vehicle rack. */
+  carrying(kind: ItemKind, good = true): boolean {
     const p = this.player;
-    const stats = deriveStats(this.vehicle);
-    const ground = this.groundFn();
-
-    p.blocking = intent.block;
-    p.attackCooldown = Math.max(0, p.attackCooldown - dt);
-
-    if (p.mode === 'foot') {
-      const before = { x: p.pos.x, z: p.pos.z };
-      const wasAirborne = !p.onGround;
-      this.prevFallSpeed = p.vel.y < 0 ? -p.vel.y : 0;
-
-      stepMovement(p, intent, this.playerBoxes(), dt, ground);
-      p.movedDist += Math.hypot(p.pos.x - before.x, p.pos.z - before.z);
-      const sp = horizontalSpeed(p.vel);
-      if (sp > p.topSpeed) p.topSpeed = sp;
-
-      if (wasAirborne && p.onGround) this.onLanded();
-
-      if (p.movedDist > 3) this.objectives.complete('move', this.events);
-
-      if (this.level.gate && !this.gateOpen && p.topSpeed >= GATE_SPEED) {
-        this.gateOpen = true;
-        this.events.push({ t: 'gateOpen' }, { t: 'sfx', name: 'gate' });
-        this.objectives.complete('bhop', this.events);
-      }
-      stepKart(this.kart, null, this.staticBoxes(), dt, stats, ground);
-    } else {
-      stepKart(this.kart, intent, this.staticBoxes(), dt, stats, ground);
-      p.yaw = intent.yaw;
-      p.pitch = intent.pitch;
-      p.pos.x = this.kart.pos.x;
-      p.pos.z = this.kart.pos.z;
-      p.pos.y = this.kart.pos.y - this.kart.half.y;
-      if (this.kart.lastImpact > 0) {
-        this.events.push(
-          { t: 'impact', severity: this.kart.lastImpact, pos: { ...this.kart.pos } },
-          { t: 'sfx', name: 'crash' },
-        );
-      }
-      this.checkCheckpoints();
-      this.checkExfil();
-    }
-
-    this.stepCreep(dt);
-    this.stepSurvival(dt);
-    this.stepWolves(dt);
-
-    if (this.kart.integrity <= 0 && !this.failed) this.fail('vehicle');
+    const ok = (it: WorldItem | undefined) => !!it && it.kind === kind && (!good || it.cond === 'good');
+    if (ok(this.items.get(p.held))) return true;
+    if (p.belt.some((id) => ok(this.items.get(id)))) return true;
+    for (const v of this.vehicles.values()) if (v.rack.some((id) => ok(this.items.get(id)))) return true;
+    return false;
   }
 
-  private onLanded(): void {
-    const dmg = fallDamage(this.prevFallSpeed, this.hazardDef);
-    if (dmg > 0) {
-      const r = applyDamage(this.vitals, dmg);
-      this.events.push({ t: 'damage', amount: r.damage, cause: 'fall' }, { t: 'sfx', name: 'hurt' });
-      if (r.wentDown) this.fail('downed');
-    }
+  heldItem(): WorldItem | undefined {
+    return this.items.get(this.player.held);
   }
 
-  /** The cliff-edge opener: the vehicle rolls until someone chocks the wheels. */
-  private stepCreep(dt: number): void {
-    const c = this.level.creep;
-    if (!c || this.chocked || this.player.mode === 'kart') return;
-    const fwd = yawForward(this.kart.heading);
-    this.kart.pos.x += fwd.x * c.speed * dt;
-    this.kart.pos.z += fwd.z * c.speed * dt;
-    if (this.terrain) this.kart.pos.y = this.terrain.heightAt(this.kart.pos.x, this.kart.pos.z) + this.kart.half.y;
-    this.creepDist += c.speed * dt;
-    if (this.creepDist >= c.failAfter) this.fail('creep');
-  }
-
-  private stepSurvival(dt: number): void {
-    if (!this.level.hazards) return;
-    const sheltered = this.player.mode === 'kart';
-    const res = stepHazards(
-      this.vitals,
-      { pos: this.player.pos, warmth: this.level.warmth ?? [], sheltered },
-      this.hazardDef,
-      dt,
-    );
-    if (res.damage > 0) this.events.push({ t: 'damage', amount: res.damage, cause: res.cause ?? 'cold' });
-    if (res.wentDown) this.fail('downed');
-  }
-
-  private stepWolves(dt: number): void {
-    if (!this.wolves.length) return;
-    const ground = this.groundFn();
-    const combat: CombatEvent[] = [];
-    const target = {
-      pos: this.player.pos,
-      blocking: this.player.blocking,
-      downed: this.vitals.downed || this.player.mode === 'kart',
-    };
-    let bite = 0;
-    for (const w of this.wolves) bite += stepWolf(w, target, dt, combat, ground);
-
-    for (const e of combat) {
-      const kind = e.t.replace('wolf', '').toLowerCase() as 'notice' | 'telegraph' | 'lunge' | 'hit' | 'hurt' | 'died';
-      this.events.push({ t: 'wolf', kind, id: e.id, pos: e.pos });
-      if (e.t === 'wolfTelegraph') this.events.push({ t: 'sfx', name: 'wolfGrowl' });
-      if (e.t === 'wolfHit') this.events.push({ t: 'sfx', name: 'wolfBite' });
-      if (e.t === 'wolfDied') this.events.push({ t: 'sfx', name: 'wolfDie' });
-    }
-    if (bite > 0) {
-      const r = applyDamage(this.vitals, bite);
-      this.events.push({ t: 'damage', amount: r.damage, cause: 'attack' }, { t: 'sfx', name: 'hurt' });
-      if (r.wentDown) this.fail('downed');
-    }
-  }
-
-  private checkCheckpoints(): void {
-    const cps = this.level.checkpoints;
-    if (!cps || this.objectives.isDone('drive')) return;
-    if (this.cpIndex >= cps.length) return;
-    if (dist2D(this.kart.pos, cps[this.cpIndex]) < CHECKPOINT_RADIUS) {
-      this.cpIndex++;
-      this.events.push({ t: 'checkpoint', index: this.cpIndex, total: cps.length });
-      if (this.cpIndex >= cps.length) {
-        this.objectives.complete('drive', this.events);
-        this.events.push({ t: 'sfx', name: 'success' });
-      } else {
-        this.events.push({ t: 'sfx', name: 'gate' });
-      }
-    }
-  }
-
-  private checkExfil(): void {
-    const x = this.level.exfil;
-    if (!x || this.won) return;
-    if (!this.objectives.readyToFinish()) return;
-    if (dist2D(this.kart.pos, x.pos) <= x.radius) {
-      this.objectives.complete('exfil', this.events);
-      this.win();
-    }
-  }
-
-  private win(): void {
-    if (this.won) return;
-    this.won = true;
-    this.events.push({ t: 'win' }, { t: 'sfx', name: 'win' });
-  }
-
-  private fail(reason: 'downed' | 'vehicle' | 'creep'): void {
-    if (this.failed || this.won) return;
-    this.failed = reason;
-    this.events.push({ t: 'fail', reason }, { t: 'sfx', name: 'fail' });
-  }
-
-  // --- commands -------------------------------------------------------------
-
-  command(cmd: Command): void {
-    switch (cmd.t) {
-      case 'slot':
-        if (cmd.n >= 0 && cmd.n < this.player.hotbar.length) this.player.selSlot = cmd.n;
-        break;
-      case 'drop':
-        this.dropCarried();
-        break;
-      case 'attack':
-        this.doAttack();
-        break;
-      case 'useItem':
-        this.useSelected();
-        break;
-      case 'solveLore':
-        if (!this.loreFound) {
-          this.loreFound = true;
-          this.objectives.complete('lore', this.events);
-          this.events.push({ t: 'lore' }, { t: 'sfx', name: 'success' });
-        }
-        break;
-      case 'solvePuzzle': {
-        if (repairSocket(this.vehicle, cmd.socketId)) {
-          this.activePuzzle = null;
-          this.events.push({ t: 'repaired', socketId: cmd.socketId }, { t: 'sfx', name: 'repair' });
-          this.afterVehicleChange();
-        }
-        break;
-      }
-      case 'interact':
-        this.doInteract();
-        break;
-    }
-  }
-
-  private doAttack(): void {
-    const p = this.player;
-    if (p.mode !== 'foot' || p.attackCooldown > 0) return;
-    // You need something to swing; bare hands don't count (GDD §3.6).
-    const weapon = p.hotbar[p.selSlot];
-    if (weapon !== 'wrench' && weapon !== 'flare') return;
-    p.attackCooldown = 0.55;
-    this.events.push({ t: 'swing' }, { t: 'sfx', name: 'swing' });
-
-    const combat: CombatEvent[] = [];
-    const facing = yawForward(p.yaw);
-    for (const w of this.wolves) {
-      if (strikeWolf(w, p.pos, facing, combat, WOLF)) break;
-    }
-    for (const e of combat) {
-      const kind = e.t.replace('wolf', '').toLowerCase() as 'hurt' | 'died';
-      this.events.push({ t: 'wolf', kind, id: e.id, pos: e.pos });
-      if (e.t === 'wolfDied') this.events.push({ t: 'sfx', name: 'wolfDie' });
-    }
-  }
-
-  private useSelected(): void {
-    const p = this.player;
-    const kind = p.hotbar[p.selSlot];
-    if (kind !== 'medkit') return;
-    if (this.vitals.hp >= this.vitals.maxHp) return;
-    const before = this.vitals.hp;
-    heal(this.vitals, 55);
-    p.hotbar[p.selSlot] = null;
-    this.events.push({ t: 'healed', amount: this.vitals.hp - before }, { t: 'sfx', name: 'heal' });
-  }
-
-  /** What the player would interact with right now (HUD prompt + action). */
-  findInteract(): InteractTarget | null {
-    const p = this.player;
-    if (p.mode === 'kart') {
-      return { kind: 'enterKart', label: 'Exit vehicle', pos: { ...this.kart.pos } };
-    }
-
-    const eye = this.eyePos();
-    const fwd = yawForward(p.yaw);
-    const candidates: InteractTarget[] = [];
-
-    if (p.carrying && isPartKind(p.carrying)) {
-      const variant = p.carryingVariant ? variantById(p.carryingVariant) : undefined;
-      const name = variant ? variant.name : ITEM_DEFS[p.carrying].label;
-      for (const s of openSockets(this.vehicle, p.carrying)) {
-        candidates.push({
-          kind: 'installPart',
-          label: `Install ${name}`,
-          pos: this.socketWorldPos(s.anchor),
-          socketId: s.id,
-          variantId: p.carryingVariant ?? undefined,
-        });
-      }
-      // Swapping is only meaningful when it's a different variant.
-      for (const s of filledSockets(this.vehicle, p.carrying)) {
-        if (s.broken || s.installed === p.carryingVariant) continue;
-        candidates.push({
-          kind: 'installPart',
-          label: `Swap in ${name}`,
-          pos: this.socketWorldPos(s.anchor),
-          socketId: s.id,
-          variantId: p.carryingVariant ?? undefined,
-        });
-      }
-    } else if (!p.carrying) {
-      for (const it of this.activeItems()) {
-        if (it.picked) continue;
-        candidates.push({
-          kind: 'pickup',
-          label: `Pick up ${ITEM_DEFS[it.kind].label}`,
-          pos: { ...it.pos },
-          itemId: it.id,
-        });
-      }
-      // Broken systems open their repair puzzle — but not while the thing is
-      // still rolling toward a drop. Stabilise it first.
-      const stabilised = !this.level.creep || this.chocked;
-      for (const s of this.vehicle.sockets) {
-        if (!stabilised || !s.installed || !s.broken) continue;
-        candidates.push({
-          kind: 'repair',
-          label: `Repair ${s.label ?? ITEM_DEFS[s.accepts].label}`,
-          pos: this.socketWorldPos(s.anchor),
-          socketId: s.id,
-          priority: 2,
-        });
-      }
-      // Pull a fitted, working part back off (so a build is never locked in).
-      // Lowest priority: it must never shadow "Drive" or a repair.
-      for (const s of this.vehicle.sockets) {
-        if (!s.installed || s.broken) continue;
-        const v = variantById(s.installed);
-        candidates.push({
-          kind: 'uninstallPart',
-          label: `Remove ${v ? v.name : ITEM_DEFS[s.accepts].label}`,
-          pos: this.socketWorldPos(s.anchor),
-          socketId: s.id,
-          priority: -1,
-        });
-      }
-      for (const st of this.level.stations) {
-        if (st.requires && !this.objectives.isDone(st.requires)) continue;
-        if (st.kind === 'lore' && this.loreFound) continue;
-        if (st.kind === 'chock' && this.chocked) continue;
-        if (st.kind === 'clockOut' && !this.objectives.readyToFinish()) continue;
-        const kind = st.kind === 'paint' ? 'paint' : st.kind === 'lore' ? 'openLore' : st.kind === 'chock' ? 'chock' : 'clockIn';
-        // Chocking is the urgent opener — it outranks everything at the vehicle.
-        candidates.push({ kind, label: st.label, pos: { ...st.pos }, stationId: st.id, priority: kind === 'chock' ? 3 : 1 });
-      }
-      if (isDrivable(this.vehicle) && !this.kart.occupied) {
-        candidates.push({ kind: 'enterKart', label: 'Drive', pos: { ...this.kart.pos }, priority: 2 });
-      }
-    }
-
-    // Prefer what you're looking at: highest priority first, then best-aligned
-    // (view dot), with distance only as a tie-breaker. Behaves like a crosshair.
-    let best: InteractTarget | null = null;
-    let bestPri = -Infinity;
-    let bestDot = INTERACT_CONE;
-    let bestDist = Infinity;
-    for (const c of candidates) {
-      const d3 = Math.hypot(c.pos.x - eye.x, c.pos.y - eye.y, c.pos.z - eye.z);
-      if (d3 > INTERACT_RANGE) continue;
-      const dir = vnorm({ x: c.pos.x - eye.x, y: 0, z: c.pos.z - eye.z });
-      const dot = fwd.x * dir.x + fwd.z * dir.z;
-      if (dot < INTERACT_CONE) continue;
-      const pri = c.priority ?? 1;
-      if (pri > bestPri) {
-        bestPri = pri;
-        bestDot = dot;
-        bestDist = d3;
-        best = c;
-        continue;
-      }
-      if (pri < bestPri) continue;
-      if (dot > bestDot + 0.02 || (Math.abs(dot - bestDot) <= 0.02 && d3 < bestDist)) {
-        bestDot = dot;
-        bestDist = d3;
-        best = c;
+  /** Nearest loose item of a kind (optionally only good ones). */
+  nearestItem(kind: ItemKind, good = true): WorldItem | undefined {
+    const p = this.playerPos();
+    let best: WorldItem | undefined;
+    let bd = Infinity;
+    for (const it of this.items.list) {
+      if (it.kind !== kind || !this.items.visible(it)) continue;
+      if (good && it.cond !== 'good') continue;
+      if (ITEM_DEFS[kind].fluid && it.fill < 0.05) continue;
+      const d = Math.hypot(it.pos.x - p.x, it.pos.z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = it;
       }
     }
     return best;
   }
 
-  private doInteract(): void {
-    const target = this.findInteract();
-    if (!target) return;
-    const p = this.player;
-
-    switch (target.kind) {
-      case 'pickup': {
-        const it = this.items.find((i) => i.id === target.itemId);
-        if (!it || it.picked) return;
-        it.picked = true;
-        const def = ITEM_DEFS[it.kind];
-        if (def.heavy) {
-          p.carrying = it.kind;
-          p.carryingVariant = it.variantId ?? null;
-          p.carryingItemId = it.id;
-        } else {
-          const slot = p.hotbar.indexOf(null);
-          if (slot === -1) {
-            it.picked = false; // toolbelt full — leave it where it is
-            return;
-          }
-          p.hotbar[slot] = it.kind;
-        }
-        this.events.push({ t: 'pickup', kind: it.kind }, { t: 'sfx', name: 'pickup' });
-        if (it.kind === 'wrench') this.objectives.complete('pickup', this.events);
-        break;
-      }
-
-      case 'installPart': {
-        if (!target.socketId || !target.variantId) return;
-        const socket = socketById(this.vehicle, target.socketId);
-        const displaced = socket?.installed ?? null;
-        if (installPart(this.vehicle, target.socketId, target.variantId)) {
-          const kind = (p.carrying ?? 'engine') as ItemKind;
-          // Swapping hands you back the part that came out.
-          if (displaced) {
-            const old = this.items.find((i) => i.variantId === displaced && i.picked);
-            if (old) {
-              p.carryingVariant = displaced;
-              p.carryingItemId = old.id;
-            } else {
-              p.carrying = null;
-              p.carryingVariant = null;
-              p.carryingItemId = null;
-            }
-          } else {
-            p.carrying = null;
-            p.carryingVariant = null;
-            p.carryingItemId = null;
-          }
-          this.events.push(
-            { t: 'installPart', kind, variantId: target.variantId },
-            { t: 'sfx', name: 'install' },
-          );
-          this.afterVehicleChange();
-        }
-        break;
-      }
-
-      case 'uninstallPart': {
-        if (!target.socketId) return;
-        const s = socketById(this.vehicle, target.socketId);
-        if (!s || !s.installed) return;
-        const variantId = s.installed;
-        const item = this.items.find((i) => i.variantId === variantId && i.picked);
-        if (!item) return; // nothing to hand back — refuse rather than dupe
-        if (uninstallPart(this.vehicle, target.socketId) === null) return;
-        p.carrying = s.accepts as ItemKind;
-        p.carryingVariant = variantId;
-        p.carryingItemId = item.id;
-        this.events.push({ t: 'uninstallPart', kind: s.accepts as ItemKind }, { t: 'sfx', name: 'pickup' });
-        break;
-      }
-
-      case 'repair':
-        if (target.socketId) this.openRepairPuzzle(target.socketId);
-        break;
-
-      case 'paint': {
-        const i = (PAINT_PALETTE.indexOf(this.vehicle.bodyColor) + 1) % PAINT_PALETTE.length;
-        this.vehicle.bodyColor = PAINT_PALETTE[i];
-        this.events.push({ t: 'paint', color: this.vehicle.bodyColor }, { t: 'sfx', name: 'pickup' });
-        break;
-      }
-
-      case 'chock': {
-        if (this.chocked) return;
-        this.chocked = true;
-        this.events.push({ t: 'chocked' }, { t: 'sfx', name: 'install' });
-        this.completeStation(target.stationId);
-        break;
-      }
-
-      case 'openLore':
-        this.events.push({ t: 'openLore' });
-        break;
-
-      case 'enterKart':
-        if (p.mode === 'kart') this.exitKart();
-        else if (isDrivable(this.vehicle)) {
-          p.mode = 'kart';
-          this.kart.occupied = true;
-          this.events.push({ t: 'enterKart' }, { t: 'sfx', name: 'enter' });
-        }
-        break;
-
-      case 'clockIn':
-        this.completeStation(target.stationId);
-        this.win();
-        break;
-    }
+  /** Run `fn` the first time `flag` is claimed. */
+  once(flag: string, fn: () => void): void {
+    if (this.flags.has(flag)) return;
+    this.setFlag(flag);
+    fn();
   }
 
-  /** Open a system's repair puzzle. Returns false if it isn't broken. */
-  openRepairPuzzle(socketId: string): boolean {
-    const s = socketById(this.vehicle, socketId);
-    if (!s || !s.broken) return false;
-    this.activePuzzle = this.makePuzzle(s.id, s.broken);
-    this.events.push({
-      t: 'openPuzzle',
-      socketId: s.id,
-      puzzle: s.broken,
-      label: s.label ?? ITEM_DEFS[s.accepts].label,
-    });
+  collectLore(id: string): void {
+    if (this.lore.has(id)) return;
+    this.lore.add(id);
+    const def = this.level.lore?.find((l) => l.id === id);
+    this.events.push({ t: 'lore', id, title: def?.title ?? id });
+  }
+
+  openDoor(id: string, open = true): void {
+    const d = this.doors.get(id);
+    if (!d || d.open === open) return;
+    d.open = open;
+    d.collider.setEnabled(!open);
+    const pos = { x: d.def.hinge.x, y: d.def.hinge.y + 1, z: d.def.hinge.z };
+    this.events.push({ t: 'door', id, open, pos });
+  }
+
+  /** Current objective. */
+  currentBeat(): BeatDef | undefined {
+    return this.level.beats[this.beat];
+  }
+
+  objectiveText(): { text: string; detail: string | null } | null {
+    const b = this.currentBeat();
+    if (!b) return null;
+    const text = typeof b.text === 'function' ? b.text(this) : b.text;
+    const detail = b.detail ? (typeof b.detail === 'function' ? b.detail(this) : b.detail) : null;
+    return { text, detail };
+  }
+
+  marker(): Vec3 | null {
+    return this.currentBeat()?.marker?.(this) ?? null;
+  }
+
+  // --- inventory ------------------------------------------------------------------
+
+  private giveHands(it: WorldItem): boolean {
+    if (this.player.held !== null) return false;
+    this.items.take(it, 'held');
+    this.player.held = it.id;
+    this.events.push({ t: 'pickup', item: it.id, kind: it.kind, heavy: ITEM_DEFS[it.kind].heavy });
     return true;
   }
 
-  private completeStation(stationId?: string): void {
-    const st = this.level.stations.find((s) => s.id === stationId);
-    if (st?.completes) this.objectives.complete(st.completes, this.events);
-  }
-
-  private makePuzzle(socketId: string, kind: PuzzleKind): ActivePuzzle {
-    // Seeded off the level + socket so every player sees the same puzzle and a
-    // retry after backing out is the same puzzle, not a fresh one.
-    let seed = this.level.puzzleSeed;
-    for (let i = 0; i < socketId.length; i++) seed = (seed * 31 + socketId.charCodeAt(i)) | 0;
-    switch (kind) {
-      case 'fuse':
-        return { socketId, kind, fuse: makeFuseGrid(seed, 3) };
-      case 'bolt':
-        return { socketId, kind, bolt: makeBoltTorque(seed, 4, 1) };
-      case 'valve':
-        return { socketId, kind, valve: makeValveBalance(seed, 3, 3, 1) };
-    }
-  }
-
-  private afterVehicleChange(): void {
-    if (!isDrivable(this.vehicle)) return;
-    const id = this.objectives.has('assemble') ? 'assemble' : this.objectives.has('repair') ? 'repair' : null;
-    if (id && !this.objectives.isDone(id)) {
-      this.objectives.complete(id, this.events);
-      this.events.push({ t: 'vehicleDrivable' });
-    }
-  }
-
-  private exitKart(): void {
+  private pickUp(it: WorldItem): void {
+    const def = ITEM_DEFS[it.kind];
     const p = this.player;
+    if (def.carry === 'pocket') {
+      this.items.take(it, 'pocket');
+      p.pockets.push({ kind: it.kind, tag: it.tag });
+      this.events.push({ t: 'pocket', kind: it.kind, tag: it.tag });
+      return;
+    }
+    if (def.carry === 'belt') {
+      const slot = p.belt.indexOf(null);
+      if (slot < 0) return;
+      this.items.take(it, 'belt');
+      p.belt[slot] = it.id;
+      // Picking up a tool selects it: you grabbed it to use it.
+      p.sel = slot;
+      this.events.push({ t: 'belt', item: it.id, kind: it.kind, slot });
+      return;
+    }
+    this.giveHands(it);
+  }
+
+  /** Drop (power 0) or throw (power 0..1) what's in hand, or the selected tool. */
+  private release(power: number): void {
+    const p = this.player;
+    let id = p.held;
+    let fromBelt = false;
+    if (id === null) {
+      id = p.belt[p.sel];
+      fromBelt = true;
+    }
+    const it = this.items.get(id);
+    if (!it) return;
+    const eye = p.eye();
+    const dir = p.look();
+    const reach = 0.75;
+    const hit = this.phys.castRay(eye, dir, reach + 0.3, G.STATIC | G.VEHICLE | G.DOOR);
+    const d = hit ? Math.max(0.15, hit.toi - 0.35) : reach;
+    const pos = { x: eye.x + dir.x * d, y: eye.y + dir.y * d - 0.25, z: eye.z + dir.z * d };
+    const speed = power > 0 ? 3 + power * 9 * (ITEM_DEFS[it.kind].heavy ? 0.55 : 1) : 0.4;
+    const vel = { x: p.vel.x + dir.x * speed, y: p.vel.y * 0.5 + dir.y * speed + (power > 0 ? 1.8 : 0), z: p.vel.z + dir.z * speed };
+    // Thrown things tumble end over end about the player's right axis.
+    const spin = power > 0 ? { x: Math.cos(p.yaw) * -6 * power, y: 0, z: Math.sin(p.yaw) * 6 * power } : undefined;
+    this.items.release(it, pos, qYaw(p.yaw), vel, spin);
+    if (fromBelt) p.belt[p.sel] = null;
+    else p.held = null;
+    this.events.push({ t: 'drop', item: it.id, kind: it.kind, thrown: power > 0 });
+  }
+
+  selectedTool(): ItemKind | null {
+    return this.items.get(this.player.belt[this.player.sel])?.kind ?? null;
+  }
+
+  private consumeBelt(kind: ItemKind): boolean {
+    const p = this.player;
+    const i = p.belt.findIndex((id) => this.items.get(id)?.kind === kind);
+    if (i < 0) return false;
+    const it = this.items.get(p.belt[i]);
+    if (it) it.state = 'gone';
+    p.belt[i] = null;
+    return true;
+  }
+
+  // --- damage -----------------------------------------------------------------------
+
+  hurt(amount: number, cause: string): void {
+    if (this.ended) return;
+    if (this.level.safe) amount = Math.min(amount, Math.max(0, this.vitals.hp - 25));
+    const r = applyDamage(this.vitals, amount);
+    if (r.damage <= 0) return;
+    this.damageTaken += r.damage;
+    this.events.push({ t: 'damage', amount: r.damage, cause });
+    if (r.wentDown) this.fail('downed');
+  }
+
+  fail(reason: FailReason): void {
+    if (this.ended || this.level.safe) return;
+    this.ended = 'failed';
+    this.failReason = reason;
+    this.events.push({ t: 'fail', reason });
+  }
+
+  win(): void {
+    if (this.ended) return;
+    this.ended = 'won';
+    this.events.push({ t: 'win' });
+  }
+
+  // --- the crosshair ----------------------------------------------------------------
+
+  private candidates(): Interactable[] {
+    const out: Interactable[] = [];
+    const p = this.player;
+    const eye = p.eye();
+    const reach = INTERACT_REACH;
+    const held = this.items.get(p.held);
+
+    // Items lying about.
+    for (const it of this.items.list) {
+      if (!this.items.visible(it)) continue;
+      if (Math.hypot(it.pos.x - eye.x, it.pos.y - eye.y, it.pos.z - eye.z) > reach + 1) continue;
+      const def = ITEM_DEFS[it.kind];
+      const sh = def.shape;
+      const r = sh.t === 'box' ? Math.max(sh.hx, sh.hy, sh.hz) + 0.05 : sh.r + 0.03;
+      let disabled: string | undefined;
+      if (def.carry === 'hands' && held) disabled = 'Hands full (G to drop)';
+      if (def.carry === 'belt' && !p.belt.includes(null)) disabled = 'Toolbelt full';
+      out.push({
+        id: `item:${it.id}`,
+        pos: it.pos,
+        r,
+        label: `Pick up ${itemLabel(it)}`,
+        verb: 'tap',
+        priority: 0,
+        disabled,
+        target: `item:${it.id}`,
+        run: () => this.pickUp(it),
+      });
+    }
+
+    // Machines (vehicles under repair, donors).
+    for (const m of this.machines.values()) {
+      if (Math.hypot(m.pos.x - eye.x, m.pos.z - eye.z) > reach + 8) continue;
+      out.push(...m.interactables(this.ctx, eye, reach));
+    }
+
+    // Getting in, racks.
+    for (const v of this.vehicles.values()) {
+      if (Math.hypot(v.pos.x - eye.x, v.pos.z - eye.z) > reach + 5) continue;
+      this.vehicleInteractables(v, held, out);
+    }
+
+    // Level stations.
+    for (const st of this.level.stations) {
+      if (Math.hypot(st.pos.x - eye.x, st.pos.y - eye.y, st.pos.z - eye.z) > reach + st.r + 0.5) continue;
+      const i = this.stationInteractable(st);
+      if (i) out.push(i);
+    }
+
+    // Doors.
+    for (const d of this.doors.values()) {
+      if (d.def.scripted) continue;
+      const def = d.def;
+      const c = {
+        x: def.hinge.x + Math.cos(def.yaw) * def.width * 0.5,
+        y: def.hinge.y + 1.1,
+        z: def.hinge.z - Math.sin(def.yaw) * def.width * 0.5,
+      };
+      if (Math.hypot(c.x - eye.x, c.y - eye.y, c.z - eye.z) > reach + 1) continue;
+      const locked = def.locked && !d.open && !this.hasItem('key', def.locked) ? `Locked — needs the ${def.locked} key` : undefined;
+      const name = def.label ?? 'door';
+      out.push({
+        id: `door:${def.id}`,
+        pos: c,
+        r: 0.6,
+        label: `${d.open ? 'Close' : 'Open'} the ${name}`,
+        verb: 'tap',
+        priority: -1,
+        disabled: locked,
+        target: `door:${def.id}`,
+        run: () => this.openDoor(def.id, !d.open),
+      });
+    }
+    return out;
+  }
+
+  private vehicleInteractables(v: Vehicle, held: WorldItem | undefined, out: Interactable[]): void {
+    const pl = this.placements.get(v.key)!;
+    const door = v.world(v.def.door.pos);
+    let why: string | null = null;
+    if (v.machine) {
+      if (!v.machine.state.inspected && v.machine.def.inspect) why = 'Inspect it first';
+      else why = v.machine.readyToDrive(this.items);
+    }
+    if (!why && pl.needsKey && !this.hasItem('key', pl.needsKey)) why = `Needs the ${pl.needsKey} key`;
+    if (!why && held) why = v.def.rack ? 'Hands full — strap it to the rack' : 'Hands full (G to drop)';
+    if (!why && v.flipped > 1) why = 'It’s on its roof — R to flip it';
+    const verb = v.def.kind === 'atv' ? 'Ride' : 'Drive';
+    out.push({
+      id: `vehicle:${v.key}:enter`,
+      pos: door,
+      r: v.def.door.r,
+      label: `${verb} the ${v.def.name}`,
+      verb: 'tap',
+      priority: 0,
+      disabled: why ?? undefined,
+      target: `vehicle:${v.key}`,
+      run: () => this.enterVehicle(v),
+    });
+    if (v.def.rack) {
+      const rp = v.world(v.def.rack);
+      const top = this.items.get(v.rack[v.rack.length - 1]);
+      if (held) {
+        const full = v.rack.length >= RACK_MAX;
+        out.push({
+          id: `vehicle:${v.key}:rack`,
+          pos: rp,
+          r: 0.55,
+          label: `Strap the ${itemLabel(held).toLowerCase()} to the rack`,
+          verb: 'tap',
+          priority: 2,
+          disabled: full ? 'Rack’s full' : undefined,
+          target: `vehicle:${v.key}:rack`,
+          run: () => {
+            const it = this.ctx.takeHeld();
+            if (!it) return;
+            it.state = 'racked';
+            v.rack.push(it.id);
+            this.events.push({ t: 'sfx', name: 'strap', pos: rp });
+          },
+        });
+      } else if (top) {
+        out.push({
+          id: `vehicle:${v.key}:unrack`,
+          pos: rp,
+          r: 0.55,
+          label: `Take the ${itemLabel(top).toLowerCase()} off the rack`,
+          verb: 'tap',
+          priority: 0,
+          target: `vehicle:${v.key}:rack`,
+          run: () => {
+            v.rack.pop();
+            top.state = 'world';
+            this.giveHands(top);
+          },
+        });
+      }
+    }
+  }
+
+  private stationInteractable(st: StationDef): Interactable | null {
+    const ok = st.when ? st.when(this) : true;
+    if (ok === false) return null;
+    return {
+      id: `station:${st.id}`,
+      pos: st.pos,
+      r: st.r,
+      label: typeof st.label === 'function' ? st.label(this) : st.label,
+      verb: st.verb,
+      time: st.time,
+      priority: st.priority ?? 0,
+      disabled: ok === true ? undefined : ok,
+      target: st.target ?? `station:${st.id}`,
+      run: () => st.run(this),
+    };
+  }
+
+  // --- vehicles ---------------------------------------------------------------------
+
+  private enterVehicle(v: Vehicle): void {
+    const p = this.player;
+    p.mode = 'drive';
+    p.vehicle = v.key;
+    p.setActive(false);
+    p.flashlight = false;
+    v.occupied = true;
+    this.torquing = null;
+    if (!v.running) v.crank = v.def.kind === 'atv' ? 0.6 : 1.3;
+    this.events.push({ t: 'enter', vehicle: v.key });
+  }
+
+  private exitVehicle(): void {
+    const p = this.player;
+    const v = p.vehicle ? this.vehicles.get(p.vehicle) : undefined;
+    if (!v) return;
+    // Try the driver's side, then the other side, then over the roof.
+    const sides = [v.def.exit, { x: -v.def.exit.x, y: v.def.exit.y, z: v.def.exit.z }, { x: 0, y: 2.2, z: 0 }];
+    let spot = v.world(sides[0]);
+    for (const s of sides) {
+      const w = v.world(s);
+      const from = { x: w.x, y: v.pos.y + 0.8, z: w.z };
+      const d = vnorm({ x: w.x - v.pos.x, y: 0, z: w.z - v.pos.z });
+      const blocked = this.phys.castRay({ x: v.pos.x, y: v.pos.y + 0.8, z: v.pos.z }, d, Math.hypot(w.x - v.pos.x, w.z - v.pos.z), G.STATIC | G.DOOR);
+      if (!blocked) {
+        spot = { x: from.x, y: 0, z: from.z };
+        break;
+      }
+    }
+    const gy = this.terrain.heightAt(spot.x, spot.z);
+    const down = this.phys.castRay({ x: spot.x, y: v.pos.y + 2.5, z: spot.z }, { x: 0, y: -1, z: 0 }, 6, G.STATIC);
+    spot.y = Math.max(gy, down ? down.point.y : gy) + 0.05;
+    v.occupied = false;
     p.mode = 'foot';
-    this.kart.occupied = false;
-    this.kart.speed = 0;
-    const fwd = yawForward(this.kart.heading);
-    const x = this.kart.pos.x - fwd.z * 2;
-    const z = this.kart.pos.z + fwd.x * 2;
-    p.pos = { x, y: this.groundHeight(x, z), z };
-    p.vel = { x: 0, y: 0, z: 0 };
-    this.events.push({ t: 'exitKart' });
+    p.vehicle = null;
+    p.setActive(true);
+    const f = v.forward();
+    p.teleport(spot, Math.atan2(-f.x, -f.z));
+    this.events.push({ t: 'exit', vehicle: v.key });
   }
 
-  private dropCarried(): void {
+  private openPanel(m: Machine, id: string): void {
+    this.panel = { machine: m.key, panel: id };
+    this.player.mode = 'panel';
+    this.torquing = null;
+  }
+
+  private closePanel(): void {
+    if (!this.panel) return;
+    this.panel = null;
+    if (this.player.mode === 'panel') this.player.mode = 'foot';
+    this.events.push({ t: 'panelClose' });
+  }
+
+  // --- commands ---------------------------------------------------------------------
+
+  command(c: Command): void {
     const p = this.player;
-    if (!p.carrying) return;
-    // Match by id, not by kind+variant: two identical parts used to make this
-    // drop whichever instance happened to be found first.
-    const it = this.items.find((i) => i.id === p.carryingItemId);
-    if (it) {
-      const fwd = yawForward(p.yaw);
-      const x = p.pos.x + fwd.x * 1.2;
-      const z = p.pos.z + fwd.z * 1.2;
-      it.pos = { x, y: this.groundHeight(x, z) + 0.5, z };
-      it.picked = false;
+    switch (c.t) {
+      case 'slot':
+        if (c.n >= 0 && c.n < BELT_SLOTS) p.sel = c.n;
+        break;
+      case 'cycle':
+        p.sel = (p.sel + (c.dir > 0 ? 1 : BELT_SLOTS - 1)) % BELT_SLOTS;
+        break;
+      case 'flashlight':
+        if (this.hasItem('flashlight')) {
+          p.flashlight = !p.flashlight;
+          this.events.push({ t: 'sfx', name: 'click' });
+        }
+        break;
+      case 'lights': {
+        const v = p.vehicle ? this.vehicles.get(p.vehicle) : undefined;
+        if (v) {
+          v.lights = !v.lights;
+          this.events.push({ t: 'sfx', name: 'click' });
+        }
+        break;
+      }
+      case 'horn':
+        if (p.vehicle) this.events.push({ t: 'horn', vehicle: p.vehicle });
+        break;
+      case 'unflip': {
+        const v = p.vehicle ? this.vehicles.get(p.vehicle) : undefined;
+        if (v && (v.flipped > 0.5 || Math.abs(v.speed) < 1)) v.unflip();
+        break;
+      }
+      case 'fuse':
+        if (this.panel) this.machine(this.panel.machine).pressFuse(this.panel.panel, c.index, this.ctx);
+        break;
+      case 'valve':
+        if (this.panel) this.machine(this.panel.machine).setValve(this.panel.panel, c.index, c.value, this.ctx);
+        break;
+      case 'commitValves':
+        if (this.panel && !this.machine(this.panel.machine).commitValves(this.panel.panel, this.ctx)) {
+          this.events.push({ t: 'sfx', name: 'hiss' });
+        }
+        break;
+      case 'closePanel':
+        this.closePanel();
+        break;
     }
-    this.events.push({ t: 'drop', kind: p.carrying });
-    p.carrying = null;
-    p.carryingVariant = null;
-    p.carryingItemId = null;
   }
 
-  /** 0..1 mission progress, for the results screen. */
-  integrity(): number {
-    return clamp(this.kart.integrity, 0, 1);
+  // --- the tick -----------------------------------------------------------------------
+
+  step(intent: Intent, dt: number): void {
+    if (this.ended) return;
+    this.elapsed += dt;
+    this.stepClock(dt);
+    const p = this.player;
+    const pressed = (k: keyof Intent) => !!intent[k] && !this.prev[k];
+    const released = (k: keyof Intent) => !intent[k] && !!this.prev[k];
+    this.swingCooldown = Math.max(0, this.swingCooldown - dt);
+
+    if (p.mode === 'foot') {
+      p.pitch = clamp(intent.pitch, -1.5, 1.5);
+      const held = this.items.get(p.held);
+      const heavy = held ? ITEM_DEFS[held.kind].heavy : false;
+      const r = p.move(
+        { fwd: intent.fwd, back: intent.back, left: intent.left, right: intent.right, jump: intent.jump, crouch: intent.crouch, sprint: intent.sprint, yaw: intent.yaw },
+        dt,
+        heavy ? { speed: 0.72, jump: 0.78, canSprint: false } : { speed: 1, jump: 1, canSprint: true },
+      );
+      if (r === 'jump') this.events.push({ t: 'jump' });
+      if (r === 'land') {
+        this.events.push({ t: 'land', speed: p.landSpeed, surface: p.surface });
+        const dmg = fallDamage(p.landSpeed, this.hazardDef);
+        if (dmg > 0) this.hurt(dmg, 'fall');
+      }
+      this.updateFocus();
+      this.handleInteract(intent, pressed('interact'), dt);
+      this.handleUse(intent, pressed('use'), released('use'), dt);
+      if (intent.drop) this.dropCharge += dt;
+      if (released('drop')) {
+        this.release(this.dropCharge > 0.22 ? clamp((this.dropCharge - 0.1) / 0.7, 0.2, 1) : 0);
+        this.dropCharge = 0;
+      }
+    } else if (p.mode === 'drive') {
+      this.focus = null;
+      const v = this.vehicle(p.vehicle!);
+      p.yaw = intent.yaw;
+      p.pitch = intent.pitch;
+      if (pressed('interact') && Math.abs(v.speed) < 3.5) this.exitVehicle();
+    } else {
+      this.focus = null;
+    }
+
+    // Vehicles: pin state, controls.
+    for (const v of this.vehicles.values()) {
+      const pl = this.placements.get(v.key)!;
+      v.updatePin(this.items, pl.pin ? pl.pin(this) : false);
+      if (v.crank > 0) {
+        v.crank -= dt;
+        if (v.crank <= 0) {
+          v.running = true;
+          this.events.push({ t: 'crank', vehicle: v.key, ok: true });
+        }
+      }
+      const driving = p.mode === 'drive' && p.vehicle === v.key;
+      v.control(
+        driving
+          ? {
+              throttle: (intent.fwd ? 1 : 0) - (intent.back ? 1 : 0),
+              steer: (intent.left ? 1 : 0) - (intent.right ? 1 : 0),
+              handbrake: intent.jump,
+            }
+          : null,
+        dt,
+        this.items,
+      );
+    }
+
+    this.phys.step(dt);
+    this.items.sync();
+
+    for (const v of this.vehicles.values()) {
+      v.sync(dt);
+      if (v.impact > 0.02) {
+        this.events.push({ t: 'impact', vehicle: v.key, severity: v.impact, pos: { ...v.pos } });
+        if (!this.level.safe) v.integrity = clamp(v.integrity - v.impact * 0.28, 0, 1);
+        if (v.occupied && v.impact > 0.25) this.hurt(v.impact * 6, 'crash');
+      }
+      if (v.def.rack) {
+        // Stack racked cargo up the rack, each piece riding on the one below.
+        let y = v.def.rack.y + 0.05;
+        for (const id of v.rack) {
+          const it = this.items.get(id);
+          if (!it) continue;
+          const sh = ITEM_DEFS[it.kind].shape;
+          const hh = sh.t === 'box' ? sh.hy : sh.r * 0.35;
+          it.pos = v.world({ x: v.def.rack.x, y: y + hh, z: v.def.rack.z });
+          it.rot = v.rot;
+          y += hh * 2 + 0.02;
+        }
+      }
+      // Only the contract vehicle (the one you inspect) can lose you the job.
+      const contract = !!this.placements.get(v.key)?.def.inspect;
+      if (contract && this.level.lostY !== undefined && v.pos.y < this.level.lostY) this.fail('vehicleLost');
+      if (contract && v.integrity <= 0) this.fail('wrecked');
+    }
+    if (p.mode === 'drive' && p.vehicle) {
+      const v = this.vehicle(p.vehicle);
+      const seat = v.world(v.def.seat);
+      p.pos = { x: seat.x, y: seat.y - (p.height - 0.18), z: seat.z };
+    }
+
+    for (const m of this.machines.values()) m.refresh(this.items, (e) => this.events.push(e));
+
+    this.stepFlares(dt);
+    this.stepWolves(intent, dt);
+    this.stepSurvival(dt);
+    this.stepDirector(dt);
+    this.stepDoors(dt);
+    this.prev = { ...intent };
+  }
+
+  private stepClock(dt: number): void {
+    // The sun keeps moving on its own, a little; beats pull it along faster.
+    this.hour += dt * 0.0012;
+    if (this.hourTarget !== null) {
+      const d = this.hourTarget - this.hour;
+      if (Math.abs(d) < 0.001) this.hourTarget = null;
+      else this.hour += Math.sign(d) * Math.min(Math.abs(d), dt * 0.012);
+    }
+  }
+
+  private updateFocus(): void {
+    const p = this.player;
+    const eye = p.eye();
+    const dir = p.look();
+    const cands = this.candidates();
+    this.focus = pickFocus({ origin: eye, dir }, cands, INTERACT_REACH, (c, dist) => {
+      // Walls and terrain block the crosshair; the thing itself doesn't.
+      const hit = this.phys.castRay(eye, dir, dist, G.STATIC | G.DOOR);
+      if (!hit || hit.toi > dist - c.r - 0.05) return false;
+      const owner = hit.tag?.owner ?? '';
+      return !(c.target && owner && c.target.startsWith(owner));
+    });
+  }
+
+  private handleInteract(intent: Intent, pressedE: boolean, dt: number): void {
+    const f = this.focus;
+    if (!intent.interact) {
+      this.holdLatch = false;
+      if (this.holdId?.startsWith('e:')) this.resetHold();
+      return;
+    }
+    if (!f || f.disabled) {
+      if (this.holdId?.startsWith('e:')) this.resetHold();
+      return;
+    }
+    if (f.verb === 'tap') {
+      if (pressedE) f.run?.();
+      return;
+    }
+    if (f.verb === 'pour') {
+      this.holdId = 'e:' + f.id;
+      f.tick?.(dt);
+      const g = f.gauge?.();
+      this.holdProgress = g ? g.value : 0;
+      return;
+    }
+    if (f.verb === 'hold') {
+      if (this.holdLatch) return;
+      if (this.holdId !== 'e:' + f.id) {
+        this.holdId = 'e:' + f.id;
+        this.holdProgress = 0;
+      }
+      this.holdProgress += dt / (f.time ?? 1);
+      if (this.holdProgress >= 1) {
+        f.run?.();
+        this.resetHold();
+        this.holdLatch = true; // let go before the next hold starts
+      }
+    }
+  }
+
+  private handleUse(intent: Intent, pressedUse: boolean, releasedUse: boolean, dt: number): void {
+    const f = this.focus;
+    const onBolt = f && !f.disabled && (f.verb === 'loosen' || f.verb === 'torque');
+
+    if (this.torquing && (releasedUse || !onBolt || f!.id !== this.torquing.id)) {
+      this.torquing.release?.();
+      this.torquing = null;
+      this.holdProgress = 0;
+    }
+    if (!intent.use) {
+      this.useLatch = false;
+      if (this.holdId?.startsWith('u:')) this.resetHold();
+      return;
+    }
+    if (this.useLatch) return;
+    if (onBolt) {
+      if (f!.verb === 'torque') {
+        this.torquing = f;
+        f!.tick?.(dt);
+        this.holdProgress = f!.gauge?.().value ?? 0;
+        return;
+      }
+      if (this.holdId !== 'u:' + f!.id) {
+        this.holdId = 'u:' + f!.id;
+        this.holdProgress = 0;
+      }
+      this.holdProgress += dt / (f!.time ?? 0.5);
+      if (this.holdProgress >= 1) {
+        f!.run?.();
+        this.resetHold();
+        this.useLatch = true;
+      }
+      return;
+    }
+    if (pressedUse) this.useTool();
+  }
+
+  private resetHold(): void {
+    this.holdId = null;
+    this.holdProgress = 0;
+  }
+
+  /** LMB with no bolt under the crosshair: use whatever tool is selected. */
+  private useTool(): void {
+    const p = this.player;
+    if (p.held !== null) return;
+    const tool = this.selectedTool();
+    if (tool === 'medkit') {
+      if (this.vitals.hp >= this.vitals.maxHp) {
+        this.toast('Already patched up');
+        return;
+      }
+      const before = this.vitals.hp;
+      heal(this.vitals, 55);
+      this.consumeBelt('medkit');
+      this.events.push({ t: 'healed', amount: this.vitals.hp - before });
+    } else if (tool === 'flare') {
+      this.consumeBelt('flare');
+      const f = yawForward(p.yaw);
+      const x = p.pos.x + f.x * 3.5;
+      const z = p.pos.z + f.z * 3.5;
+      const pos = { x, y: this.terrain.heightAt(x, z) + 0.05, z };
+      this.flares.push({ pos, ttl: 30 });
+      this.events.push({ t: 'flare', pos });
+    } else if (tool === 'wrench' && this.swingCooldown <= 0) {
+      this.swingCooldown = 0.55;
+      const combat: CombatEvent[] = [];
+      const facing = yawForward(p.yaw);
+      let hit = false;
+      for (const w of this.wolves) if (strikeWolf(w, p.pos, facing, combat, WOLF)) hit = true;
+      this.events.push({ t: 'swing', hit });
+      this.pushCombat(combat);
+    }
+  }
+
+  private pushCombat(list: CombatEvent[]): void {
+    for (const e of list) {
+      const kind = e.t.replace('wolf', '').toLowerCase() as 'notice' | 'telegraph' | 'lunge' | 'hit' | 'hurt' | 'died' | 'flee';
+      this.events.push({ t: 'wolf', kind, id: e.id, pos: e.pos });
+    }
+  }
+
+  private stepFlares(dt: number): void {
+    for (const f of this.flares) f.ttl -= dt;
+    this.flares = this.flares.filter((f) => f.ttl > 0);
+  }
+
+  /** Has this wolf come out yet (its `after` flag is set)? */
+  wolfAwake(id: number): boolean {
+    const after = this.wolfAfter.get(id);
+    return !after || this.flags.has(after);
+  }
+
+  private stepWolves(intent: Intent, dt: number): void {
+    if (!this.wolves.length) return;
+    const p = this.player;
+    const combat: CombatEvent[] = [];
+    const target = {
+      pos: this.playerPos(),
+      blocking: intent.block && p.mode === 'foot',
+      downed: this.vitals.downed || p.mode === 'drive',
+      fear: this.flares.map((f) => f.pos),
+    };
+    let bite = 0;
+    const ground = (x: number, z: number) => this.terrain.heightAt(x, z);
+    for (const w of this.wolves) {
+      const after = this.wolfAfter.get(w.id);
+      if (after && !this.flags.has(after)) continue;
+      bite += stepWolf(w, target, dt, combat, ground);
+    }
+    this.pushCombat(combat);
+    if (bite > 0) this.hurt(bite, 'wolf');
+  }
+
+  private stepSurvival(dt: number): void {
+    if (!this.level.hazards) return;
+    const p = this.player;
+    const warmth = [...(this.level.warmth ?? [])];
+    const sheltered = p.mode === 'drive';
+    const res = stepHazards(this.vitals, { pos: p.pos, warmth, sheltered }, this.hazardDef, dt);
+    if (res.damage > 0) {
+      this.damageTaken += res.damage;
+      this.events.push({ t: 'damage', amount: res.damage, cause: res.cause ?? 'cold' });
+    }
+    if (res.wentDown) this.fail('cold');
+  }
+
+  private stepDoors(dt: number): void {
+    for (const d of this.doors.values()) {
+      const target = d.open ? 1 : 0;
+      d.swing += clamp(target - d.swing, -dt * 2.5, dt * 2.5);
+    }
+  }
+
+  private stepDirector(dt: number): void {
+    this.level.tick?.(this, dt);
+    const beats = this.level.beats;
+    // Triggers run regardless of beat.
+    for (const t of this.level.triggers ?? []) {
+      if (this.triggersFired.has(t.id)) continue;
+      if (this.player.mode === 'drive' && !t.vehicle) continue;
+      if (!this.near(t.pos, t.r)) continue;
+      if (t.when && !t.when(this)) continue;
+      this.triggersFired.add(t.id);
+      t.run(this);
+    }
+
+    let guard = 0;
+    while (this.beat < beats.length && guard++ < 8) {
+      const b = beats[this.beat];
+      if (!this.beatStarted) {
+        this.beatStarted = true;
+        this.beatTime = 0;
+        if (b.hour !== undefined) this.hourTarget = b.hour;
+        b.start?.(this);
+        const o = this.objectiveText();
+        if (o) this.events.push({ t: 'objective', id: b.id, text: o.text });
+      }
+      if (!b.done(this)) break;
+      b.finish?.(this);
+      this.events.push({ t: 'objectiveDone', id: b.id });
+      if (b.checkpoint) {
+        this.checkpoint = b.id;
+        this.events.push({ t: 'checkpoint', id: b.id });
+      }
+      this.beat++;
+      this.beatStarted = false;
+    }
+    if (this.beat >= beats.length) {
+      this.win();
+      return;
+    }
+    const b = beats[this.beat];
+    this.beatTime += dt;
+    for (const [t, line] of b.hints ?? []) {
+      const key = `${b.id}@${t}`;
+      if (this.beatTime >= t && !this.hintsFired.has(key)) {
+        this.hintsFired.add(key);
+        this.say(line, 'Dispatch', 0);
+      }
+    }
+  }
+
+  /**
+   * Jump to just after a checkpoint beat: every beat up to it is finished,
+   * and each one's `restore` rebuilds the state it would have left behind.
+   */
+  restoreTo(beatId: string): void {
+    const beats = this.level.beats;
+    const idx = beats.findIndex((b) => b.id === beatId);
+    if (idx < 0) return;
+    for (let i = 0; i <= idx; i++) {
+      const b = beats[i];
+      if (b.hour !== undefined) this.hour = b.hour;
+      b.restore?.(this);
+      this.hintsFired.add(`${b.id}@restored`);
+    }
+    this.phys.step(1 / 60);
+    this.items.sync();
+    for (const v of this.vehicles.values()) v.sync(1 / 60);
+    for (const m of this.machines.values()) m.refresh(this.items, () => {});
+    this.beat = idx + 1;
+    this.beatStarted = false;
+    this.checkpoint = beatId;
+    this.events = [];
+  }
+
+  // --- restore helpers (checkpoints) ---------------------------------------------
+
+  /** Fit a fresh part in a machine slot, bolted down. */
+  fit(machine: string, slot: string, spec: ItemSpawn): void {
+    const m = this.machine(machine);
+    const old = this.items.get(m.state.slots[slot]);
+    if (old) this.items.take(old, 'gone');
+    const it = this.items.spawn({ ...spec, mounted: true });
+    m.mount(slot, it, 'tight');
+  }
+
+  /** Remove every loose item of a kind (it was used up before the checkpoint). */
+  consume(kind: ItemKind, count = 1): void {
+    for (const it of this.items.list) {
+      if (count <= 0) return;
+      if (it.kind === kind && it.state === 'world') {
+        this.items.take(it, 'gone');
+        count--;
+      }
+    }
+  }
+
+  /** Put a tool straight on the belt. */
+  giveBelt(kind: ItemKind): void {
+    if (this.hasItem(kind)) return;
+    const it = this.items.list.find((i) => i.kind === kind && i.state === 'world') ?? this.items.spawn({ kind, pos: this.player.pos });
+    const slot = this.player.belt.indexOf(null);
+    if (slot < 0) return;
+    this.items.take(it, 'belt');
+    this.player.belt[slot] = it.id;
+  }
+
+  givePocket(tag: string): void {
+    if (this.hasItem('key', tag)) return;
+    const it = this.items.list.find((i) => i.kind === 'key' && i.tag === tag);
+    if (it) this.items.take(it, 'pocket');
+    this.player.pockets.push({ kind: 'key', tag });
+  }
+
+  placeVehicle(key: string, pos: Vec3, yaw: number): void {
+    this.vehicle(key).place(pos, yaw);
   }
 
   drainEvents(): SimEvent[] {
-    if (this.events.length === 0) return [];
+    if (!this.events.length) return [];
     const out = this.events;
     this.events = [];
     return out;
   }
+
+  dispose(): void {
+    this.phys.dispose();
+  }
+
+  /** Debug/test: put the player somewhere. */
+  teleport(pos: Vec3, yaw?: number, pitch?: number): void {
+    const p = this.player;
+    if (p.mode === 'drive') this.exitVehicle();
+    const y = pos.y ?? this.terrain.heightAt(pos.x, pos.z);
+    p.teleport({ x: pos.x, y, z: pos.z }, yaw);
+    if (pitch !== undefined) p.pitch = pitch;
+  }
 }
+
+export { RAPIER };

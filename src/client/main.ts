@@ -1,583 +1,354 @@
 /// <reference types="vite/client" />
-import { World } from '../sim/world';
-import { DT } from '../shared/constants';
-import { ITEM_DEFS, makeIntent, type Intent } from '../shared/types';
+import '@fontsource/barlow-condensed/500.css';
+import '@fontsource/barlow-condensed/600.css';
+import '@fontsource/barlow-condensed/700.css';
+import '@fontsource/barlow-condensed/800.css';
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/500.css';
+import '@fontsource/inter/600.css';
+import * as THREE from 'three';
 import { loadSettings, type Settings } from './settings';
-import { Dispatch } from './voice';
-import { Menu } from './ui/menu';
-import { Intro } from './ui/intro';
-import { Shell } from './ui/shell';
-import { horizontalSpeed } from '../sim/movement';
-import { GameView } from './render/view';
 import { Input } from './input';
 import { Hud } from './ui/hud';
-import { PuzzleOverlay, type PuzzleSpec } from './ui/puzzles';
-import { Sfx } from './audio';
-import { formatTime } from '../shared/timer';
-import { deriveStats, installPart, variantById } from '../sim/vehicle';
-import { makeGarage } from '../content/levels/garage';
-import { makeMountains } from '../content/levels/mountains';
-import type { LevelDef } from '../content/levels/types';
+import { Menu } from './ui/menu';
+import { Shell } from './ui/shell';
+import { Game } from './game';
+import { Mixer } from './audio/mixer';
+import { makeIntent } from '../sim/world';
+import { gradeWorld } from '../sim/grade';
+import { LEVELS } from '../content/levels';
+import { INTROS } from './cinematics';
 import { CAMPAIGN, completeMission, loadProgress } from './progress';
 
+// Boot + the app flow: title (over a live backdrop) → contracts → loading →
+// play → results / failure → back round again.
+
 const app = document.getElementById('app')!;
-
-const LEVELS: Record<string, () => LevelDef> = {
-  garage: makeGarage,
-  mountains: makeMountains,
-};
-
-let world: World;
-let view: GameView;
+let settings: Settings;
 let input: Input;
 let hud: Hud;
-let puzzles: PuzzleOverlay;
-let sfx: Sfx;
-let shell: Shell;
-
-type Phase = 'menu' | 'playing' | 'over';
-let phase: Phase = 'menu';
-let paused = false;
-let acc = 0;
-let last = 0;
-let forceActive = false; // dev/test: step without pointer lock
-let debugIntent: Intent | null = null;
-let settings: Settings;
-let dispatch: Dispatch;
+let audio: Mixer;
 let menu: Menu;
-let intro: Intro;
-let prevOnGround = true;
-let stepAccum = 0;
-let currentLevel = 'garage';
-let lowIntegrityWarned = false;
-let coldWarned = false;
-let wolfWarned = false;
+let shell: Shell;
+let game: Game | null = null;
+/** The contract being played (null on the title backdrop). */
+let playing: string | null = null;
+let backdrop: string | null = null;
+let orbit = 0;
+let resumedAt = 0;
+let last = performance.now();
+let loadSeq = 0;
+let lastCheckpoint: string | null = null;
 
-function boot(): void {
-  settings = loadSettings();
-  try {
-    world = new World(makeGarage());
-    view = new GameView(world, app, settings);
-  } catch (err) {
-    const l = document.getElementById('loading');
-    if (l) l.querySelector('.msg')!.textContent = 'WebGL failed to start: ' + (err as Error).message;
-    return;
+const TIPS = [
+  'Look at something and the prompt tells you what E will do. If it’s greyed out, it tells you why.',
+  'Hold <b>Tab</b> for the job sheet: every system on the vehicle, and the next step for each.',
+  'Torque bolts with the wrench: hold the mouse button and let go while the needle is in the green.',
+  'Negative terminal off first, on last. Your fingers will thank you.',
+  'Heavy parts slow you down. Toss them with a long press of <b>G</b>.',
+  'Wolves won’t come near a lit flare.',
+  'In a vehicle, <b>V</b> swaps between the chase and cockpit cameras.',
+  'Stuck on its roof? <b>R</b> rights a vehicle when it’s stopped.',
+  'The Company pays the same whether you find the extra stuff or not. Your grade doesn’t.',
+];
+
+function loading(k: number, msg: string): void {
+  const el = document.getElementById('loading')!;
+  el.style.display = '';
+  (el.querySelector('.bar i') as HTMLElement).style.width = `${Math.round(k * 100)}%`;
+  el.querySelector('.msg')!.textContent = msg;
+}
+
+function fade(on: boolean): Promise<void> {
+  document.getElementById('fade')!.classList.toggle('on', on);
+  return new Promise((r) => setTimeout(r, on ? 620 : 0));
+}
+
+async function load(id: string, mode: 'play' | 'backdrop'): Promise<Game | null> {
+  const seq = ++loadSeq;
+  const make = LEVELS[id] ?? LEVELS.depot;
+  const lv = make();
+  if (mode === 'play') {
+    const tip = document.querySelector('#loading .tip') as HTMLElement;
+    tip.innerHTML = `<b>Tip</b>${TIPS[Math.floor(Math.random() * TIPS.length)]}`;
+    (document.querySelector('#loading .logo') as HTMLElement).innerHTML = lv.title.toUpperCase().replace(/(\S+)$/, '<em>$1</em>');
+  } else {
+    (document.querySelector('#loading .logo') as HTMLElement).innerHTML = 'THE <em>MECHANICS</em>';
+    (document.querySelector('#loading .tip') as HTMLElement).innerHTML = '';
   }
-  input = new Input(app, settings, world.player.yaw);
-  hud = new Hud();
-  puzzles = new PuzzleOverlay();
-  puzzles.setColorblind(settings.accessibility.colorblind);
-  sfx = new Sfx(settings);
-  dispatch = new Dispatch(settings);
-  intro = new Intro();
-  menu = new Menu(settings, input, {
-    onResume: resumeGame,
-    onRestart: () => startMission(currentLevel),
-    onQuit: () => toMenu(),
-    apply: applySettings,
+  loading(0.02, 'Loading');
+  game?.dispose();
+  game = null;
+  audio.stopAll();
+  hud.show(false);
+  const g = new Game(lv, settings, input, hud, audio, {
+    onWin: (gg) => setTimeout(() => gg === game && finished(gg), 2600),
+    onFail: (gg) => setTimeout(() => gg === game && failed(gg), 2200),
+    onPause: () => pause(),
   });
-  shell = new Shell({
-    onPlay: (id) => startMission(id),
-    onSettings: () => menu.openSettings(true),
-  });
-  input.onUnlock = () => {
-    if (phase === 'playing' && !paused && !puzzles.open && !menu.open) openPause();
-  };
-
-  if (import.meta.env.DEV) installDebugBridge();
-
+  await g.init(app, loading);
+  if (seq !== loadSeq) {
+    g.dispose();
+    return null;
+  }
+  game = g;
   document.getElementById('loading')!.style.display = 'none';
-  toMenu();
-  requestAnimationFrame(loop);
+  return g;
 }
 
-function installDebugBridge(): void {
-  (window as unknown as { __mech: unknown }).__mech = {
-    unlock: () => {
-      forceActive = true;
-    },
-    level: (id: string) => startMission(id),
-    openGate: () => {
-      world.gateOpen = true;
-    },
-    pause: () => openPause(),
-    openSettings: () => menu.openSettings(true),
-    openLore: () => openLore(),
-    toMenu: () => toMenu(),
-    /** Renderer cost for the current scene — the meaningful perf signal when
-     *  the harness is running on a software rasteriser. */
-    stats: () => {
-      const info = view.renderer.info;
-      return {
-        drawCalls: info.render.calls,
-        triangles: info.render.triangles,
-        programs: info.programs?.length ?? 0,
-        geometries: info.memory.geometries,
-        textures: info.memory.textures,
-      };
-    },
-    /** Force the mission outcome, to inspect the results and fail cards. */
-    forceWin: () => {
-      for (const o of world.objectives.list) o.done = true;
-      world.events.push({ t: 'win' });
-      drainEvents();
-    },
-    forceFail: (reason: 'downed' | 'vehicle' | 'creep' = 'downed') => {
-      world.events.push({ t: 'fail', reason });
-      drainEvents();
-    },
-    chock: () => {
-      world.command({ t: 'interact' });
-      world.chocked = true;
-    },
-    /** Finish every repair on the current vehicle without doing the work. */
-    fixAll: () => {
-      for (const s of world.vehicle.sockets) {
-        if (s.broken) world.command({ t: 'solvePuzzle', socketId: s.id });
-        if (s.required && !s.installed) {
-          const item = world.items.find((i) => i.kind === s.accepts && !i.picked);
-          if (item?.variantId) installPart(world.vehicle, s.id, item.variantId);
-        }
-      }
-      world.chocked = true;
-      drainEvents();
-    },
-    buildCar: () => {
-      const v = world.vehicle;
-      const set = (id: string, vid: string) => installPart(v, id, vid);
-      set('wheelFL', 'wheel.slick');
-      set('wheelFR', 'wheel.slick');
-      set('wheelRL', 'wheel.slick');
-      set('wheelRR', 'wheel.slick');
-      set('engine', 'engine.v8');
-      set('seat', 'seat.racing');
-      set('body', 'body.light');
-      set('bumper', 'bumper.bull');
-      set('headlights', 'headlights.std');
-      set('spoiler', 'spoiler.gt');
-      set('exhaust', 'exhaust.sport');
-      set('battery', 'battery.hd');
-      v.bodyColor = 0x2f7fd1;
-      if (!world.objectives.isDone('assemble')) world.objectives.complete('assemble', world.events);
-      drainEvents();
-    },
-    setVariant: (socketId: string, variantId: string) => installPart(world.vehicle, socketId, variantId),
-    enterKart: () => {
-      world.player.mode = 'kart';
-      world.kart.occupied = true;
-      sfx.startEngine();
-    },
-    drive: (p: Partial<Intent>) => {
-      const it = makeIntent();
-      Object.assign(it, p);
-      if (p.yaw !== undefined) input.yaw = p.yaw;
-      debugIntent = it;
-    },
-    look: (yaw: number, pitch = 0) => {
-      input.yaw = yaw;
-      input.pitch = pitch;
-    },
-    stop: () => {
-      debugIntent = makeIntent();
-    },
-    /** Teleport by world XZ (y snaps to the ground). */
-    teleport: (x: number, z: number, yaw = 0, pitch = 0) => {
-      const p = world.player;
-      p.mode = 'foot';
-      p.pos.x = x;
-      p.pos.z = z;
-      p.pos.y = world.groundHeight(x, z);
-      p.vel.x = p.vel.y = p.vel.z = 0;
-      input.yaw = yaw;
-      input.pitch = pitch;
-      debugIntent = makeIntent();
-    },
-    /** Open a specific repair puzzle without walking to it. */
-    openRepair: (socketId: string) => {
-      const ok = world.openRepairPuzzle(socketId);
-      drainEvents();
-      return ok;
-    },
-    /** Stand `back` metres from the vehicle, looking straight at it. */
-    faceVehicle: (back = 6, height = 1.2) => {
-      const k = world.kart.pos;
-      const yaw = Math.atan2(-back * 0.6, -back);
-      const x = k.x + Math.sin(yaw + Math.PI) * back;
-      const z = k.z + Math.cos(yaw + Math.PI) * back;
-      const p = world.player;
-      p.mode = 'foot';
-      p.pos.x = x;
-      p.pos.z = z;
-      p.pos.y = world.groundHeight(x, z) + height;
-      p.vel.x = p.vel.y = p.vel.z = 0;
-      input.yaw = Math.atan2(-(k.x - x), -(k.z - z));
-      input.pitch = -0.12;
-      debugIntent = makeIntent();
-      return { vehicle: { ...k }, player: { ...p.pos }, yaw: input.yaw };
-    },
-    /** Teleport along the mountain road: t in 0..1, lateral metres outward. */
-    roadTo: (t: number, lateral = 0, yaw = 0, pitch = 0) => {
-      const terr = world.terrain;
-      if (!terr) return;
-      const c = terr.roadPoint(t);
-      const len = Math.hypot(c.x, c.z) || 1;
-      const x = c.x + (c.x / len) * lateral;
-      const z = c.z + (c.z / len) * lateral;
-      const p = world.player;
-      p.mode = 'foot';
-      p.pos.x = x;
-      p.pos.z = z;
-      p.pos.y = world.groundHeight(x, z);
-      p.vel.x = p.vel.y = p.vel.z = 0;
-      input.yaw = yaw;
-      input.pitch = pitch;
-      debugIntent = makeIntent();
-    },
-  };
-}
+// --- screens ------------------------------------------------------------------------
 
-// --- lifecycle --------------------------------------------------------------
-
-function applySettings(): void {
-  view.applySettings(settings);
-  sfx.applySettings(settings);
-  input.applyBinds(settings);
-  dispatch.applySettings(settings);
-  puzzles.setColorblind(settings.accessibility.colorblind);
-  hud.setColorblind(settings.accessibility.colorblind);
-}
-
-function toMenu(): void {
-  phase = 'menu';
-  paused = false;
+async function toTitle(screen: 'title' | 'contracts' = 'title'): Promise<void> {
+  playing = null;
   menu.close();
-  puzzles.resetTransient();
-  document.exitPointerLock();
-  sfx.stopEngine();
-  dispatch.stop();
-  hud.setVisible(false);
-  shell.showMenu(loadProgress());
-}
-
-function startMission(id: string): void {
-  const make = LEVELS[id] ?? makeGarage;
-  currentLevel = id;
-  shell.hideAll();
-  app.innerHTML = '';
-  world = new World(make());
-  view = new GameView(world, app, settings);
-  input.yaw = world.player.yaw;
-  input.pitch = 0;
-  input.enabled = true;
-  input.clearHeld();
-  hud.buildHotbar();
-  hud.buildObjectives(world.objectives.list);
-  hud.setVisible(true);
-  hud.setColorblind(settings.accessibility.colorblind);
-  hud.setVitalsEnabled(!!world.level.hazards);
-  menu.close();
-  puzzles.resetTransient();
-  paused = false;
-  phase = 'playing';
-  acc = 0;
-  prevOnGround = true;
-  stepAccum = 0;
-  lowIntegrityWarned = false;
-  coldWarned = false;
-  wolfWarned = false;
-  sfx.stopEngine();
-  dispatch.stop();
-  sfx.resume();
-  sfx.setAmbience(world.level.terrain ? 'mountain' : 'garage');
-  sfx.setMood('calm');
-  last = performance.now();
-  dispatch.say(world.level.narrative.intro);
-  intro.play(world.level.title, world.level.subtitle, () => app.requestPointerLock());
-}
-
-function openPause(): void {
-  paused = true;
   input.enabled = false;
-  input.clearHeld();
-  document.exitPointerLock();
-  menu.openPause();
+  document.exitPointerLock?.();
+  const id = pickBackdrop();
+  if (!game || backdrop !== id || game.level.id !== id) {
+    await fade(true);
+    const g = await load(id, 'backdrop');
+    if (!g) return;
+    backdrop = id;
+    const a = g.level.attract;
+    if (a?.hour !== undefined) g.world.hour = a.hour;
+    g.paused = true;
+    await fade(false);
+  }
+  if (game) game.paused = true;
+  hud.show(false);
+  if (screen === 'title') shell.title(loadProgress());
+  else shell.contracts(loadProgress());
 }
 
-function resumeGame(): void {
+function pickBackdrop(): string {
+  // The latest unlocked contract that has a backdrop shot.
+  const p = loadProgress();
+  let id = 'depot';
+  for (const m of CAMPAIGN) if (LEVELS[m.id] && (!m.requires || p.missions[m.requires]?.completed)) id = m.id;
+  return LEVELS[id]().attract ? id : 'depot';
+}
+
+async function play(id: string, checkpoint?: string | null): Promise<void> {
+  shell.hide();
   menu.close();
-  paused = false;
-  input.enabled = true;
-  app.requestPointerLock();
-}
-
-/** Freeze the player while a diegetic panel is open. */
-function pauseForStation(): () => void {
-  paused = true;
-  input.enabled = false;
-  input.clearHeld();
-  document.exitPointerLock();
-  return () => {
-    paused = false;
-    input.enabled = true;
-    app.requestPointerLock();
-  };
-}
-
-function openLore(): void {
-  const resume = pauseForStation();
-  puzzles.resetTransient();
-  puzzles.show(
-    {
-      kind: 'fuse',
-      puzzle: world.lorePuzzle,
-      title: '⬡ SEALED CRATE',
-      blurb: 'Reroute the circuit — light every node.',
-    },
-    () => {
-      world.command({ t: 'solveLore' });
-      drainEvents();
-      resume();
-    },
-    resume,
-  );
-}
-
-function openRepair(socketId: string, kind: 'fuse' | 'bolt' | 'valve', label: string): void {
-  const p = world.activePuzzle;
-  if (!p || p.socketId !== socketId) return;
-  const resume = pauseForStation();
-  puzzles.resetTransient();
-  const spec: PuzzleSpec | null =
-    kind === 'fuse' && p.fuse
-      ? { kind: 'fuse', puzzle: p.fuse, title: `⚡ ${label.toUpperCase()}`, blurb: 'Reroute the fuse grid — light every load.' }
-      : kind === 'bolt' && p.bolt
-        ? { kind: 'bolt', puzzle: p.bolt, title: `🔩 ${label.toUpperCase()}`, blurb: 'Torque every bolt into the green band.' }
-        : kind === 'valve' && p.valve
-          ? { kind: 'valve', puzzle: p.valve, title: `🎚 ${label.toUpperCase()}`, blurb: 'Balance every gauge into its safe band.' }
-          : null;
-  if (!spec) {
-    resume();
+  await fade(true);
+  playing = id;
+  backdrop = null;
+  const g = await load(id, 'play');
+  if (!g) return;
+  // hold the world still until the intro (or the player) takes over
+  g.paused = true;
+  g.setCinematic(null);
+  hud.show(true);
+  if (checkpoint) {
+    g.world.restoreTo(checkpoint);
+    input.yaw = g.world.player.yaw;
+    input.pitch = 0;
+    hud.stampIt('CHECKPOINT', 'Picking up where you left off', 'warn');
+  }
+  const intro = !checkpoint ? INTROS[id] : undefined;
+  if (intro) {
+    input.enabled = false;
+    await fade(false);
+    g.playIntro(intro(g.world), () => {
+      g.paused = false;
+      input.yaw = g.world.player.yaw;
+      input.pitch = 0;
+      input.enabled = true;
+      if (g.level.briefing) hud.say(g.level.briefing);
+      input.lock();
+    });
     return;
   }
-  puzzles.show(
-    spec,
-    () => {
-      world.command({ t: 'solvePuzzle', socketId });
-      drainEvents();
-      resume();
-    },
-    resume,
-  );
+  input.enabled = true;
+  if (!checkpoint && g.level.briefing) hud.say(g.level.briefing);
+  await fade(false);
+  g.paused = false;
+  input.lock();
 }
 
-function onWin(): void {
-  phase = 'over';
-  sfx.stopEngine();
-  document.exitPointerLock();
-  hud.setVisible(false);
-  dispatch.say(world.level.narrative.outro);
-  const result = completeMission(currentLevel, {
-    time: world.elapsed,
-    integrity: world.integrity(),
-    loreFound: world.loreFound,
+function finished(g: Game): void {
+  g.ended = true;
+  const id = playing ?? g.level.id;
+  const grade = gradeWorld(g.world);
+  const lore = [...g.world.lore].map((l) => g.level.lore?.find((d) => d.id === l)?.title ?? l);
+  const run = completeMission(id, {
+    time: g.world.elapsed,
+    integrity: g.world.vehicles.get(mainVehicle(g))?.integrity ?? 1,
+    loreFound: g.world.lore.size > 0,
+    grade: grade.letter,
+    score: grade.score,
+    lore: [...g.world.lore],
   });
-  intro.play(
-    'EXTRACTION',
-    world.level.id === 'garage' ? 'Training Complete' : 'Contract Complete',
-    () => shell.showResults(world.level, result, loadProgress()),
-    2200,
+  menu.close();
+  audio.duck(false);
+  input.enabled = false;
+  document.exitPointerLock?.();
+  hud.show(false);
+  shell.results(
+    CAMPAIGN.find((m) => m.id === id),
+    grade,
+    run,
+    lore,
   );
 }
 
-function onFail(reason: 'downed' | 'vehicle' | 'creep'): void {
-  phase = 'over';
-  sfx.stopEngine();
-  document.exitPointerLock();
-  hud.setVisible(false);
-  dispatch.say(world.level.narrative.fail ?? '');
-  shell.showFail(world.level, reason, currentLevel);
+function mainVehicle(g: Game): string {
+  return [...g.world.placements.values()].find((p) => p.vehicle && p.def.inspect)?.key ?? '';
 }
 
-// --- event plumbing ---------------------------------------------------------
-
-function drainEvents(): void {
-  for (const e of world.drainEvents()) {
-    switch (e.t) {
-      case 'sfx':
-        sfx.play(e.name);
-        break;
-      case 'pickup':
-        hud.toast(`Picked up ${ITEM_DEFS[e.kind].label}`);
-        view.pickupFx();
-        break;
-      case 'gateOpen':
-        hud.toast('⚡ Speed gate online!');
-        view.gateFx();
-        break;
-      case 'checkpoint':
-        hud.toast(`Checkpoint ${e.index}/${e.total}`);
-        view.checkpointFx();
-        break;
-      case 'objectiveDone':
-        hud.toast('Objective complete ✓');
-        hud.buildObjectives(world.objectives.list);
-        dispatch.say(world.level.narrative.objectives[e.id] ?? '');
-        break;
-      case 'enterKart':
-        sfx.startEngine();
-        break;
-      case 'exitKart':
-        sfx.stopEngine();
-        break;
-      case 'installPart': {
-        const v = variantById(e.variantId);
-        hud.toast(`${v ? v.name : ITEM_DEFS[e.kind].label} installed`);
-        view.installFx();
-        break;
-      }
-      case 'uninstallPart':
-        hud.toast(`${ITEM_DEFS[e.kind].label} removed`);
-        break;
-      case 'chocked':
-        hud.toast('🧱 Wheels chocked — she’s not going anywhere');
-        view.installFx();
-        break;
-      case 'openPuzzle':
-        openRepair(e.socketId, e.puzzle, e.label);
-        break;
-      case 'repaired':
-        hud.toast('System GO ✓');
-        view.installFx();
-        break;
-      case 'paint':
-        hud.toast('Repainted the body');
-        break;
-      case 'vehicleDrivable':
-        hud.toast('🚗 All systems GO — hop in!');
-        view.gateFx();
-        break;
-      case 'openLore':
-        openLore();
-        break;
-      case 'lore':
-        hud.toast('📂 Recovered log found');
-        dispatch.say(world.level.narrative.lore);
-        break;
-      case 'damage':
-        hud.flashDamage(e.cause);
-        view.pulse(0, Math.min(0.4, e.amount * 0.02));
-        break;
-      case 'healed':
-        hud.toast('Patched up');
-        break;
-      case 'impact':
-        view.impactFx(e.pos, e.severity);
-        break;
-      case 'wolf':
-        if (e.kind === 'notice' && !wolfWarned) {
-          wolfWarned = true;
-          dispatch.say(world.level.narrative.wolf ?? '');
-        }
-        if (e.kind === 'telegraph') hud.toast('⚠ Wolf lunging — block (RMB) or dodge');
-        if (e.kind === 'died') view.wolfDownFx(e.pos);
-        break;
-      case 'swing':
-        view.swingFx();
-        break;
-      case 'win':
-        onWin();
-        break;
-      case 'fail':
-        onFail(e.reason);
-        break;
-    }
-  }
+function failed(g: Game): void {
+  g.ended = true;
+  menu.close();
+  audio.duck(false);
+  input.enabled = false;
+  document.exitPointerLock?.();
+  hud.show(false);
+  lastCheckpoint = g.world.checkpoint;
+  shell.failed(g.world.failReason ?? 'downed', !!lastCheckpoint);
 }
 
-/** Situational Dispatch barks that aren't tied to a discrete sim event. */
-function ambientBarks(): void {
-  const n = world.level.narrative;
-  if (!coldWarned && world.vitals.cold > 0.55) {
-    coldWarned = true;
-    dispatch.say(n.cold ?? '');
-  } else if (coldWarned && world.vitals.cold < 0.2) coldWarned = false;
-
-  if (!lowIntegrityWarned && world.kart.integrity < 0.45) {
-    lowIntegrityWarned = true;
-    dispatch.say(n.lowIntegrity ?? '');
-  }
+function pause(): void {
+  if (!game || !playing || menu.open || game.ended || game.inIntro) return;
+  if (performance.now() - resumedAt < 250) return;
+  game.paused = true;
+  input.enabled = false;
+  document.exitPointerLock?.();
+  menu.subtitle = `${game.level.title} — ${game.world.objectiveText()?.text ?? ''}`;
+  menu.openPause();
+  audio.duck(true);
 }
 
-// --- loop -------------------------------------------------------------------
+function resume(): void {
+  menu.close();
+  resumedAt = performance.now();
+  if (!game) return;
+  game.paused = false;
+  input.enabled = true;
+  input.lock();
+  audio.duck(false);
+}
+
+// --- loop -----------------------------------------------------------------------------
 
 function loop(now: number): void {
   requestAnimationFrame(loop);
   let dt = (now - last) / 1000;
   last = now;
-  if (dt > 0.25) dt = 0.25;
-
-  // Poll the pad every frame: a controller player never touches the mouse, so
-  // pointer lock can't be what gates input.
-  if (phase === 'playing' && !paused && !puzzles.open && !menu.open) input.poll(dt);
-  const active = phase === 'playing' && !paused && (input.locked || forceActive || input.padConnected);
-  if (active) {
-    acc += dt;
-    const intent = forceActive && debugIntent ? debugIntent : input.getIntent();
-    let steps = 0;
-    while (acc >= DT && steps < 6) {
-      world.step(intent, DT);
-      view.capture();
-      drainEvents();
-      acc -= DT;
-      steps++;
+  if (dt > 0.1) dt = 0.1;
+  input.poll(dt);
+  if (game && !playing) {
+    // title backdrop: slow orbit
+    const a = game.level.attract;
+    if (a) {
+      orbit += dt * (a.speed ?? 0.04);
+      const from = new THREE.Vector3(a.target.x + Math.sin(orbit) * a.radius, a.target.y + a.height, a.target.z + Math.cos(orbit) * a.radius);
+      const m = new THREE.Matrix4().lookAt(from, new THREE.Vector3(a.target.x, a.target.y, a.target.z), new THREE.Vector3(0, 1, 0));
+      game.setCinematic({ pos: from, quat: new THREE.Quaternion().setFromRotationMatrix(m) });
     }
-    for (const c of input.drainCommands()) world.command(c);
-    drainEvents();
-    ambientBarks();
-
-    // client-derived audio cues (sim stays untouched)
-    const pl = world.player;
-    if (pl.mode === 'foot') {
-      if (!prevOnGround && pl.onGround) {
-        sfx.play('land');
-        view.footFx(Math.min(1.4, Math.abs(pl.vel.y) / 8 + 0.5));
-      } else if (prevOnGround && !pl.onGround) sfx.play('jump');
-      if (pl.onGround) {
-        const sp = Math.hypot(pl.vel.x, pl.vel.z);
-        if (sp > 2.5) {
-          stepAccum += sp * dt;
-          if (stepAccum > 2.2) {
-            sfx.play('footstep');
-            view.footFx(0.35);
-            stepAccum = 0;
-          }
-        }
-      }
-      prevOnGround = pl.onGround;
-    } else {
-      sfx.updateEngine(world.kart.speed);
-      prevOnGround = true;
-    }
-  } else {
-    input.drainCommands(); // discard while frozen
   }
-
-  const alpha = active ? acc / DT : 1;
-  view.frame(dt, alpha, input.yaw, input.pitch);
-
-  if (phase !== 'menu') {
-    const sp =
-      world.player.mode === 'kart' ? Math.abs(world.kart.speed) : horizontalSpeed(world.player.vel);
-    hud.setSpeed(sp);
-    hud.setTimer(formatTime(world.elapsed), phase === 'playing');
-    hud.updateSpec(world.vehicle, deriveStats(world.vehicle));
-    hud.setPrompt(phase === 'playing' && !paused ? (world.findInteract()?.label ?? null) : null);
-    hud.updateHotbar(world.player.hotbar, world.player.selSlot, world.player.carrying);
-    hud.updateObjectives(world.objectives.list, world.objectives.activeIndex());
-    hud.updateVitals(world.vitals, world.kart.integrity);
-    hud.updateCompass(world, view.camera.rotation.y);
-  }
+  game?.frame(dt);
 }
 
-void CAMPAIGN;
-boot();
+async function boot(): Promise<void> {
+  settings = loadSettings();
+  input = new Input(app, settings);
+  hud = new Hud();
+  audio = new Mixer(settings);
+  hud.onLine = (line, who) => audio.voice(line, who);
+  const wake = () => audio.resume();
+  addEventListener('pointerdown', wake);
+  addEventListener('keydown', wake);
+  addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && game?.inIntro) {
+      e.preventDefault();
+      game.skipIntro();
+    }
+  });
+  const apply = () => {
+    input.applyBinds(settings);
+    audio.applySettings(settings);
+    game?.applySettings(settings);
+  };
+  menu = new Menu(settings, input, {
+    onResume: () => resume(),
+    onRestart: () => playing && play(playing),
+    onQuit: () => toTitle('contracts'),
+    apply,
+  });
+  shell = new Shell({
+    play: (id) => void play(id),
+    settings: () => menu.openSettings(true),
+    retry: () => {
+      const id = playing ?? game?.level.id;
+      // after a failure, go back to the last checkpoint; a replay starts fresh
+      const cp = shell.screen === 'failed' ? lastCheckpoint : null;
+      if (id) void play(id, cp);
+    },
+    contracts: () => void toTitle('contracts'),
+    title: () => void toTitle('title'),
+    sfx: (n) => audio.play(n),
+  });
+  input.onUnlock = () => {
+    // Esc in a browser drops the pointer lock before the key reaches us.
+    if (playing && game && !game.paused && !game.ended && !game.world.panel) pause();
+  };
+  const params = new URLSearchParams(location.search);
+  if (params.get('q')) settings.video.quality = params.get('q') as Settings['video']['quality'];
+  if (import.meta.env.DEV) installDebug();
+  requestAnimationFrame(loop);
+  const direct = params.get('level');
+  if (direct && direct !== 'title') await play(direct);
+  else await toTitle();
+}
+
+function installDebug(): void {
+  const bridge = {
+    game: () => game,
+    level: (id: string) => play(id),
+    title: (s: 'title' | 'contracts' = 'title') => toTitle(s),
+    finish: () => game && finished(game),
+    fail: () => game && failed(game),
+    pause: () => pause(),
+    teleport: (x: number, z: number, yaw = 0, pitch = 0, y?: number) => {
+      if (!game) return;
+      game.world.teleport({ x, y: y ?? game.world.terrain.heightAt(x, z), z }, yaw, pitch);
+      input.yaw = yaw;
+      input.pitch = pitch;
+    },
+    look: (yaw: number, pitch = 0) => {
+      input.yaw = yaw;
+      input.pitch = pitch;
+    },
+    hour: (h: number) => {
+      if (game) game.world.hour = h;
+    },
+    intent: (p: Partial<ReturnType<typeof makeIntent>> | null) => {
+      if (!game) return;
+      if (!p) game.debugIntent = null;
+      else game.debugIntent = { ...makeIntent(), yaw: input.yaw, pitch: input.pitch, ...p };
+    },
+    enter: (key: string) => {
+      const w = game?.world;
+      if (!w) return;
+      (w as unknown as { enterVehicle(v: unknown): void }).enterVehicle(w.vehicle(key));
+    },
+    stats: () => {
+      const r = game?.view.renderer.info;
+      return r ? { draws: r.render.calls, tris: r.render.triangles, geos: r.memory.geometries, tex: r.memory.textures } : null;
+    },
+    cam: (x: number, y: number, z: number, tx: number, ty: number, tz: number) => {
+      if (!game) return;
+      const from = new THREE.Vector3(x, y, z);
+      const m = new THREE.Matrix4().lookAt(from, new THREE.Vector3(tx, ty, tz), new THREE.Vector3(0, 1, 0));
+      game.setCinematic(x === undefined ? null : { pos: from, quat: new THREE.Quaternion().setFromRotationMatrix(m) });
+    },
+    nocam: () => game?.setCinematic(null),
+  };
+  (window as unknown as { __mech: typeof bridge }).__mech = bridge;
+}
+
+boot().catch((e) => {
+  console.error(e);
+  loading(0, 'Could not start: ' + (e as Error).message);
+});

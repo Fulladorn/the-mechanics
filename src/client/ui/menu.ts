@@ -18,10 +18,15 @@ const REBINDABLE: Action[] = [
   'crouch',
   'sprint',
   'interact',
-  'drop',
-  'attack',
-  'block',
   'use',
+  'drop',
+  'block',
+  'flashlight',
+  'jobsheet',
+  'camera',
+  'lights',
+  'horn',
+  'unflip',
   'pause',
 ];
 
@@ -32,6 +37,8 @@ export class Menu {
   private standalone = false;
   private capturing: Action | null = null;
   open = false;
+  /** Shown under PAUSED: the contract and current objective. */
+  subtitle = '';
 
   constructor(
     private settings: Settings,
@@ -111,13 +118,19 @@ export class Menu {
     h.textContent = 'PAUSED';
     h.className = 'menu-title';
     this.panel.appendChild(h);
+    if (this.subtitle) {
+      const sub = document.createElement('div');
+      sub.className = 'menu-sub';
+      sub.textContent = this.subtitle;
+      this.panel.appendChild(sub);
+    }
     const col = document.createElement('div');
     col.className = 'menu-col';
     col.append(
       this.btn('Resume', () => this.hooks.onResume(), true),
       this.btn('Settings', () => this.openSettings(false)),
-      this.btn('Restart Mission', () => this.hooks.onRestart()),
-      this.btn('Quit to Mission Select', () => this.hooks.onQuit()),
+      this.btn('Restart contract', () => this.hooks.onRestart()),
+      this.btn('Quit to contracts', () => this.hooks.onQuit()),
     );
     this.panel.appendChild(col);
   }
@@ -154,6 +167,14 @@ export class Menu {
       s.video.shadows = v;
       this.changed();
     });
+    this.segmented(body, 'Vehicle camera', ['chase', 'cockpit'], s.video.vehicleCam, (v) => {
+      s.video.vehicleCam = v as Settings['video']['vehicleCam'];
+      this.changed();
+    });
+    const note = document.createElement('div');
+    note.className = 'menu-note';
+    note.textContent = 'Quality, post-processing and shadows apply when the next contract loads.';
+    body.appendChild(note);
 
     this.group(body, 'Audio');
     for (const key of ['master', 'music', 'sfx', 'voice'] as const) {
@@ -201,6 +222,14 @@ export class Menu {
     });
     this.toggle(body, 'Colorblind cues', s.accessibility.colorblind, (v) => {
       s.accessibility.colorblind = v;
+      this.changed();
+    });
+    this.toggle(body, 'Wider torque band', s.accessibility.torqueAssist, (v) => {
+      s.accessibility.torqueAssist = v;
+      this.changed();
+    });
+    this.toggle(body, 'Read Dispatch aloud (TTS)', s.accessibility.tts, (v) => {
+      s.accessibility.tts = v;
       this.changed();
     });
 
@@ -251,9 +280,10 @@ export class Menu {
     input.value = String(value);
     const val = document.createElement('span');
     val.className = 'menu-val';
-    val.textContent = (+value).toFixed(2);
+    const fmt = (v: number) => (max <= 1.0001 && min >= 0 ? `${Math.round(v * 100)}%` : step >= 1 ? String(Math.round(v)) : v.toFixed(2));
+    val.textContent = fmt(+value);
     input.oninput = () => {
-      val.textContent = (+input.value).toFixed(2);
+      val.textContent = fmt(+input.value);
       onInput(+input.value);
     };
     wrap.append(input, val);

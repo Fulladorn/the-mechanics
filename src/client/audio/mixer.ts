@@ -175,6 +175,8 @@ export class Mixer implements Audio {
   private rumble?: { g: GainNode; f: BiquadFilterNode };
   private pour?: { g: GainNode };
   private flareFizz?: { g: GainNode };
+  private genLoop?: { g: GainNode };
+  private howlT = 6;
   private musicT = 0;
   private musicStep = 0;
   private birdT = 2;
@@ -251,6 +253,7 @@ export class Mixer implements Audio {
     this.engines.clear();
     if (this.pour) this.pour.g.gain.value = 0;
     if (this.rumble) this.rumble.g.gain.value = 0;
+    if (this.genLoop) this.genLoop.g.gain.value = 0;
   }
 
   // --- positional helpers --------------------------------------------------------------
@@ -502,7 +505,21 @@ export class Mixer implements Audio {
         this.synth({ type: 'triangle', f: 900, f2: 1500, dur: 0.25, vol: 0.2, pos });
         break;
       case 'howl':
-        this.synth({ type: 'sine', f: 420, f2: 620, dur: 1.8, vol: 0.12 * vol, pos, attack: 0.4 });
+        // a rising, wavering call with a lower voice under it
+        this.synth({ type: 'sine', f: 420, f2: 640, dur: 2.2, vol: 0.14 * vol, pos, attack: 0.5 });
+        this.synth({ type: 'triangle', f: 300, f2: 470, dur: 2.0, vol: 0.05 * vol, pos, attack: 0.6, delay: 0.1 });
+        break;
+      case 'genStart':
+        // cord yank, a few coughs, then it catches
+        this.synth({ type: 'noise', f: 900, dur: 0.25, vol: 0.25, pos, filter: { type: 'bandpass', f: 700, f2: 1400, q: 2 } });
+        for (let i = 0; i < 4; i++) this.synth({ type: 'noise', f: 200, dur: 0.12, vol: 0.3, pos, delay: 0.3 + i * 0.16, filter: { type: 'lowpass', f: 400 } });
+        break;
+      case 'rockslide':
+        this.synth({ type: 'noise', f: 120, dur: 3.5, vol: 0.6, pos, attack: 0.15, filter: { type: 'lowpass', f: 260 } });
+        for (let i = 0; i < 9; i++) this.sample(i % 2 ? 'plateHeavy' : 'woodHeavy', pos, 0.8, 0.5 + Math.random() * 0.3);
+        break;
+      case 'latch':
+        this.sample('latch', pos, 0.9);
         break;
       case 'objective':
         this.sample('bong', undefined, 0.35);
@@ -628,6 +645,7 @@ export class Mixer implements Audio {
     this.rumble = this.loopNoise('lowpass', 300, 1, this.sfx);
     this.pour = this.loopNoise('bandpass', 700, 2, this.sfx);
     this.flareFizz = this.loopNoise('highpass', 3500, 0.7, this.sfx);
+    this.genLoop = this.loopNoise('lowpass', 140, 4, this.sfx);
   }
 
   frame(dt: number, w: World, cam: THREE.Camera): void {
@@ -679,6 +697,28 @@ export class Mixer implements Audio {
     if (!indoors && w.hour > 19.7 && this.cricketT <= 0) {
       this.cricketT = 0.4 + Math.random() * 0.6;
       for (let i = 0; i < 3; i++) this.synth({ type: 'sine', f: 4200 + Math.random() * 300, dur: 0.04, vol: 0.02, delay: i * 0.06, bus: this.amb });
+    }
+
+    // a running generator putters where it stands
+    const gen = w.machines.get('generator');
+    if (this.genLoop) {
+      let g = 0;
+      if (gen && w.flag('millPower')) {
+        const d = this.listener.pos.distanceTo(new THREE.Vector3(gen.pos.x, gen.pos.y, gen.pos.z));
+        g = (0.09 + Math.sin(t * 38) * 0.03) / (1 + d * 0.15);
+      }
+      this.genLoop.g.gain.setTargetAtTime(g, t, 0.1);
+    }
+
+    // wolves out there somewhere call to each other after dark
+    this.howlT -= dt;
+    if (this.howlT <= 0) {
+      this.howlT = 9 + Math.random() * 14;
+      const awake = w.wolves.filter((wf) => wf.state !== 'dead' && w.wolfAwake(wf.id));
+      if (awake.length && w.hour > 19) {
+        const wf = awake[Math.floor(Math.random() * awake.length)];
+        this.play('howl', wf.pos, 1);
+      }
     }
 
     // music

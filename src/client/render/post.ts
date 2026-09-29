@@ -90,7 +90,10 @@ export class Post {
       this.grade = new GradeEffect();
       const effects: Effect[] = [
         new SMAAEffect(),
-        new BloomEffect({ intensity: 0.5, luminanceThreshold: 0.82, luminanceSmoothing: 0.3, mipmapBlur: true, radius: 0.7 }),
+        // Only true highlights bloom (lamps, flares, beacons, sun glints). A
+        // lower threshold let the bright sky bleed over every silhouette in
+        // front of it, so tree edges looked washed out / see-through.
+        new BloomEffect({ intensity: 0.55, luminanceThreshold: 1.15, luminanceSmoothing: 0.25, mipmapBlur: true, radius: 0.65 }),
         this.grade,
         new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
         new VignetteEffect({ darkness: 0.42, offset: 0.3 }),

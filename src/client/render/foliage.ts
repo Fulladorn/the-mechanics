@@ -114,15 +114,24 @@ function pine(seed: number, fir = false): THREE.BufferGeometry {
     const r = (fir ? 2.1 : 2.5) * (1 - k * 0.78) + 0.25;
     const h = (H / tiers) * 1.7;
     const y = base + (i / tiers) * H * 0.92;
-    const cone = new THREE.ConeGeometry(r, h, 10, 2, false);
+    // NB: not ConeGeometry — in three r169 a zero top radius drops half the
+    // triangles of every row below the tip, which punched holes in the boughs.
+    const cone = new THREE.CylinderGeometry(0.02, r, h, 16, 3, false);
     cone.translate((rng() - 0.5) * 0.15, y + h / 2, (rng() - 0.5) * 0.15);
-    // droop the skirt a touch, jagged
+    // droop the skirt into soft scallops, and tuck the underside up into a
+    // shallow dome so every tier is a closed, solid bough
     const pos = cone.getAttribute('position');
+    const ph = rng() * 6;
     for (let j = 0; j < pos.count; j++) {
       const py = pos.getY(j);
       if (py < y + 0.05) {
-        const a = Math.atan2(pos.getZ(j), pos.getX(j));
-        pos.setY(j, py - 0.25 - Math.abs(Math.sin(a * 5 + i)) * 0.3);
+        const px = pos.getX(j);
+        const pz = pos.getZ(j);
+        const a = Math.atan2(pz, px);
+        const rr = Math.hypot(px, pz) / r;
+        const scallop = 0.22 + (0.5 + 0.5 * Math.sin(a * 8 + ph)) * 0.14;
+        // rim droops; the cap centre lifts up inside the cone
+        pos.setY(j, py - scallop * rr + (1 - rr) * h * 0.35);
       }
     }
     let g = blob(cone, rng, 0.12, center, 0.55);
@@ -130,6 +139,8 @@ function pine(seed: number, fir = false): THREE.BufferGeometry {
       const up = THREE.MathUtils.clamp((p.y - y) / h, 0, 1);
       const out = Math.hypot(p.x, p.z) / r;
       o.copy(deep).lerp(mid, up * 0.8 + out * 0.3).lerp(tip, Math.max(0, n.y) * 0.35 * (0.5 + k));
+      // undersides sit in the tree's own shade
+      if (n.y < -0.2) o.multiplyScalar(0.72);
     });
     parts.push(g);
   }
@@ -300,11 +311,11 @@ export class Nature {
           rough: 0.9,
           noise: 0.1,
           noiseScale: 2,
-          rim: stone ? 0.15 : 0.45,
+          rim: stone ? 0.15 : canopy ? 0.22 : 0.4,
           wind: WIND[k] ?? 0,
           side: canopy || stone ? THREE.DoubleSide : THREE.FrontSide,
           backShade: canopy ? 0.72 : 0.45,
-          nearFade: canopy ? 1.1 : stone ? 0.6 : 0,
+          nearFade: canopy ? 0.45 : stone ? 0.3 : 0,
           fadeMinY: FADE_MIN_Y[k],
           spec: 0.5,
         });

@@ -290,6 +290,9 @@ if (uNearFade > 0.0 && vStylLocalY > uFadeMinY) {
       `{
   float rimF = 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) );
   rimF = rimF * rimF * rimF;
+  // The sheen is sky light: it catches surfaces that face up, never the
+  // undersides (a pale rim on the bottom of a bough reads as a hole).
+  rimF *= smoothstep( -0.25, 0.45, inverseTransformDirection( normal, viewMatrix ).y );
 #ifdef DOUBLE_SIDED
   if (!gl_FrontFacing) {
     // Undersides and interiors: no sheen, no sky reflection. Keep the light's

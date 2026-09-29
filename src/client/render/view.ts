@@ -12,7 +12,7 @@ import { CameraRig } from './cameraRig';
 import { Highlight } from './highlight';
 import { Viewmodel } from './viewmodel';
 import { Post } from './post';
-import { Particles, PARTICLE_SCALE } from './particles';
+import { Particles, PARTICLE_LIGHT, PARTICLE_SCALE } from './particles';
 import { Water } from './water';
 import { WolfPack } from './wolves';
 import { MachineView } from './machineView';
@@ -382,6 +382,16 @@ export class GameView {
       }
     }
 
+    // smoke and dust take the scene's light: pale grey by day, dim at night
+    {
+      const sl = PARTICLE_LIGHT.value;
+      const h = this.sky.hemi;
+      const sn = this.sky.sun;
+      sl.copy(h.color).multiplyScalar(h.intensity * 0.55).add(this.tmpC.copy(sn.color).multiplyScalar(sn.intensity * 0.22 * this.ambient));
+      sl.r = Math.min(1, sl.r);
+      sl.g = Math.min(1, sl.g);
+      sl.b = Math.min(1, sl.b);
+    }
     PARTICLE_SCALE.value = this.renderer.getDrawingBufferSize(this.tmpV2).y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
     this.particles.update(dt);
     this.post.render(dt, this.scene, this.camera);

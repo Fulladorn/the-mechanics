@@ -238,6 +238,10 @@ export function makeRidge(): LevelDef {
   const wreck = at(-66, 186);
   k.prop('van', { x: wreck.x, y: wreck.y + 1.0, z: wreck.z }, 2.3, { color: 0xd9d3c4, stripe: 0xff7a2f, wrecked: true });
   k.block(wreck.x, wreck.y, wreck.z, 2.0, 2.0, 4.8, 2.3, 'metal');
+  // what it was carrying: sealed crates, one split open, thrown clear
+  furnish(k, 'crate', wreck.x + 2.6, wreck.y, wreck.z + 1.8, 0.7);
+  k.prop('crate', at(wreck.x - 1.2, wreck.z + 3.4, -0.25), 1.9, undefined, 0.7);
+  k.prop('crate', at(wreck.x + 3.8, wreck.z - 1.2, -0.3), 0.3, undefined, 0.6);
 
   // --- extraction lot ---------------------------------------------------------------------------
   const L = RIDGE.lot;
@@ -645,6 +649,8 @@ export function makeRidge(): LevelDef {
       // the drift floor (no grass under the rock) and the spoil apron out front
       { x0: Mi.x - 15, z0: Mi.z - 2.3, x1: Mi.x + 0.4, z1: Mi.z + 2.3, color: 0x4e4338, grass: 0 },
       { x0: Mi.x - 2, z0: Mi.z - 6, x1: Mi.x + 10, z1: Mi.z + 6, color: 0x8b7a62, grass: 0.1, feather: 3.5 },
+      // the Company's pickup lot: a graded gravel pad
+      { x0: RIDGE.lot.x - 15, z0: RIDGE.lot.z - 13, x1: RIDGE.lot.x + 17, z1: RIDGE.lot.z + 11, color: 0x8e8574, grass: 0, feather: 2.5 },
     ],
     items,
     machines: [

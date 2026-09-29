@@ -27,6 +27,8 @@ interface EmitOpts {
  */
 /** Pixels per metre at 1 m depth; set from the camera each frame. */
 export const PARTICLE_SCALE = { value: 460 };
+/** Scene light on smoke and dust (additive sparks glow on their own). */
+export const PARTICLE_LIGHT = { value: new THREE.Color(1, 1, 1) };
 
 class Pool {
   private pos: Float32Array;
@@ -71,7 +73,7 @@ class Pool {
     this.geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
 
     const mat = new THREE.ShaderMaterial({
-      uniforms: { map: { value: map }, uSoft: { value: softness }, uScale: PARTICLE_SCALE },
+      uniforms: { map: { value: map }, uSoft: { value: softness }, uScale: PARTICLE_SCALE, uLight: additive ? { value: new THREE.Color(1, 1, 1) } : PARTICLE_LIGHT },
       transparent: true,
       depthWrite: false,
       blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending,
@@ -90,7 +92,7 @@ class Pool {
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
-        uniform sampler2D map; uniform float uSoft;
+        uniform sampler2D map; uniform float uSoft; uniform vec3 uLight;
         varying float vAlpha; varying float vRot; varying vec3 vColor;
         void main(){
           // rotate the sprite UVs so particles don't all share one orientation
@@ -100,7 +102,7 @@ class Pool {
           vec4 t = texture2D(map, uv);
           float a = t.a * vAlpha * uSoft;
           if (a < 0.004) discard;
-          gl_FragColor = vec4(t.rgb * vColor, a);
+          gl_FragColor = vec4(t.rgb * vColor * uLight, a);
         }`,
     });
 

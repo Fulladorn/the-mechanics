@@ -490,13 +490,13 @@ function van(p: PropDef): PropBuild {
     g.add(mesh(rbox(1.9, 1.36, 0.04, 0.02), paint, 0, y0 + 1.0, 2.26));
   }
   if (p.p?.wrecked) {
-    // on its side in the ditch, glass gone, rust bloom
-    g.rotation.z = 1.45;
-    g.position.y = 0;
+    // on its side in the ditch, nose dug in, glass gone, grimed and rusting
+    g.rotation.set(0.14, 0.05, 1.45);
+    g.position.y = -0.1;
     g.traverse((o) => {
       if (o instanceof THREE.Mesh && o.material === glass) o.visible = false;
     });
-    paint.color.multiply(new THREE.Color(0xa89c88));
+    paint.color.multiply(new THREE.Color(0x8f846f));
   }
   g.traverse((o) => {
     if (o instanceof THREE.Mesh) o.castShadow = true;
@@ -504,6 +504,19 @@ function van(p: PropDef): PropBuild {
   if (p.p?.wrecked) {
     const outer = new THREE.Group();
     outer.add(g);
+    // mud streaks and rust blooms over the upturned side
+    const mud = styl({ color: 0x5a4632, rough: 1, noise: 0.4, noiseScale: 3 });
+    const rust = styl({ color: 0x8a4a26, rough: 0.95, noise: 0.5, noiseScale: 5 });
+    for (let i = 0; i < 6; i++) {
+      // on the body's +X flank, which faces the sky once it's on its side
+      const m = mesh(sph(0.35 + (i % 3) * 0.15, 8, 6), i % 2 ? rust : mud, 1.0, 1.0 + ((i * 7) % 5) * 0.14 - 0.3, -1.8 + i * 0.7);
+      m.scale.set(0.06, 0.6, 1.3);
+      g.add(m);
+    }
+    // the side door it lost, lying in the grass
+    const door = mesh(rbox(0.95, 0.04, 1.3, 0.02), paint, -2.4, -0.95, 1.2);
+    door.rotation.set(0.05, 0.6, 0.03);
+    outer.add(door);
     return { obj: outer };
   }
   return { obj: g };
@@ -720,15 +733,17 @@ function lampPost(p: PropDef): PropBuild {
   g.add(mesh(rbox(0.44, 0.02, 0.24, 0.01), lens, 0.9, 5.22, 0));
   if (!p.p?.on) return { obj: g };
   // a real sodium-ish floodlight that comes on at dusk
-  const light = new THREE.SpotLight(0xffe2b0, 0, 30, 0.9, 0.6, 1.2);
+  // warm-white LED, a broad soft pool thrown out over the pad (not a hot
+  // yellow disc on the grass under the pole)
+  const light = new THREE.SpotLight(0xfff0dc, 0, 34, 1.05, 0.95, 1.3);
   light.position.set(0.9, 5.1, 0);
-  light.target.position.set(3, 0, 0);
+  light.target.position.set(6, 0, 0);
   g.add(light, light.target);
   return {
     obj: g,
     update: (_dt, _t, w) => {
       const dusk = Math.min(1, Math.max(0, (w.hour - 19.4) / 0.8));
-      light.intensity = dusk * 40;
+      light.intensity = dusk * 30;
       lens.emissiveIntensity = 0.6 + dusk * 3;
     },
   };

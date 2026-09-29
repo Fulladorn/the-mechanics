@@ -824,7 +824,7 @@ export class World {
           const it = this.items.get(id);
           if (!it) continue;
           const sh = ITEM_DEFS[it.kind].shape;
-          const hh = sh.t === 'box' ? sh.hy : sh.r * 0.35;
+          const hh = sh.t === 'box' ? sh.hy : sh.hh;
           it.pos = v.world({ x: v.def.rack.x, y: y + hh, z: v.def.rack.z });
           it.rot = v.rot;
           y += hh * 2 + 0.02;

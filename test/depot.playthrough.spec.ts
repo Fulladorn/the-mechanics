@@ -138,7 +138,7 @@ describe('tutorial: orientation day', () => {
 
     // 8. close the hood, get in
     bot.approach(front, 1.0, frontStand);
-    bot.tapAt(front, /Close the hood/);
+    bot.tapAt(m.world({ x: 0, y: 1.5, z: -1.52 }), /Close the hood/);
     expect(w.doors.get('rollup')!.open).toBe(true);
     const v = w.vehicle('betsy');
     const door = v.world(v.def.door.pos);

@@ -48,6 +48,7 @@ export class MachineView {
   private prevRot = new THREE.Quaternion();
   private curRot = new THREE.Quaternion();
   private spinBase = 0;
+  private fixedWheels: { index: number; pivot: THREE.Group; spin: THREE.Group }[] = [];
 
   constructor(
     readonly machine: Machine,
@@ -62,6 +63,24 @@ export class MachineView {
     this.prevPos.copy(this.curPos);
     this.curRot.set(machine.rot.x, machine.rot.y, machine.rot.z, machine.rot.w);
     this.prevRot.copy(this.curRot);
+
+    // Wheels that aren't machine parts (the ATV's) are just part of the model.
+    if (vehicle) {
+      vehicle.def.wheels.forEach((wd, index) => {
+        if (wd.slot) return;
+        const side: -1 | 1 = wd.pos.x < 0 ? -1 : 1;
+        const pivot = new THREE.Group();
+        const spin = new THREE.Group();
+        pivot.add(spin);
+        const r = model?.wheel;
+        const o = wheelModel(wd.radius, r?.width ?? 0.24, r?.variant ?? 'atv', false);
+        o.rotation.z = side < 0 ? Math.PI / 2 : -Math.PI / 2;
+        spin.add(o);
+        pivot.position.set(wd.pos.x, wd.pos.y - vehicle.def.suspension.rest, wd.pos.z);
+        this.root.add(pivot);
+        this.fixedWheels.push({ index, pivot, spin });
+      });
+    }
 
     for (const c of machine.def.components) {
       if (c.t === 'slot') this.addSlot(c);
@@ -280,6 +299,15 @@ export class MachineView {
         nut.rotation.y = st.torque * 14;
       });
       if (vis.wheel) this.syncWheel(vis, v, dt);
+    }
+    if (v) {
+      for (const fw of this.fixedWheels) {
+        const wd = v.def.wheels[fw.index];
+        const st = v.wheels[fw.index];
+        fw.pivot.position.set(wd.pos.x, wd.pos.y + (v.pinned ? -v.def.suspension.rest : st.hub), wd.pos.z);
+        fw.pivot.rotation.y = st.steer;
+        fw.spin.rotation.x = -(st.spin + this.spinBase);
+      }
     }
 
     // Jacks.

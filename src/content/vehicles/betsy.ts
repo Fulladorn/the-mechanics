@@ -45,7 +45,7 @@ export const BETSY_MACHINE: MachineDef = {
   name: 'Betsy',
   inspect: { pos: { x: 0, y: 0.1, z: 0 }, r: 1.9 },
   components: [
-    { t: 'cover', id: 'hood', label: 'Hood', pos: { x: 0, y: 0.3, z: -2.18 }, r: 0.4, closeToDrive: true },
+    { t: 'cover', id: 'hood', label: 'Hood', pos: { x: 0, y: 0.3, z: -2.18 }, openPos: { x: 0, y: 1.5, z: -1.52 }, r: 0.4, closeToDrive: true },
     wheelSlot('wheelFL', 'Front-left wheel', { x: -TRACK, y: HUB_Y, z: FRONT }, -1, 'jackFL'),
     wheelSlot('wheelFR', 'Front-right wheel', { x: TRACK, y: HUB_Y, z: FRONT }, 1, 'jackFR'),
     wheelSlot('wheelRL', 'Rear-left wheel', { x: -TRACK, y: HUB_Y, z: REAR }, -1, 'jackRL', 'on the tyre rack'),

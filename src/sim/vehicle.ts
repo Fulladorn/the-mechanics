@@ -83,7 +83,8 @@ export class Vehicle {
   private prevVel: Vec3 = { x: 0, y: 0, z: 0 };
   /** Impact severity this tick (0 when none). */
   impact = 0;
-  rackItem: number | null = null;
+  /** Items strapped to the cargo rack, bottom first. */
+  rack: number[] = [];
   /** Rolling average for audio (engine load). */
   load = 0;
 

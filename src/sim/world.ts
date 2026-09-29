@@ -77,6 +77,9 @@ interface Flare {
   ttl: number;
 }
 
+/** How many things fit on an ATV's cargo rack. */
+export const RACK_MAX = 4;
+
 export interface WorldOpts {
   /** Accessibility: wider torque bands. */
   assist?: boolean;
@@ -94,6 +97,10 @@ export class World {
   readonly doors = new Map<string, Door>();
   readonly wolves: Wolf[] = [];
   private wolfAfter = new Map<number, string>();
+  /** Colliders switched on (or off) by a flag. */
+  private gated: { c: RCollider; flag: string; on: boolean }[] = [];
+  /** Last checkpoint beat reached. */
+  checkpoint: string | null = null;
   readonly flags = new Set<string>();
   readonly lore = new Set<string>();
   flares: Flare[] = [];
@@ -144,7 +151,14 @@ export class World {
     this.terrain = Terrain.for(level.terrain);
     this.phys = new Physics();
     this.phys.addTerrain(this.terrain);
-    for (const s of level.statics) this.phys.addStatic(s);
+    for (const s of level.statics) {
+      const c = this.phys.addStatic(s);
+      if (s.flag) {
+        c.setEnabled(false);
+        this.gated.push({ c, flag: s.flag, on: true });
+      }
+      if (s.unflag) this.gated.push({ c, flag: s.unflag, on: false });
+    }
     this.items = new ItemManager(this.phys);
     this.vitals = makeVitals();
     this.player = new Player(this.phys, level.spawn.pos, level.spawn.yaw);
@@ -220,6 +234,7 @@ export class World {
     if (this.flags.has(name)) return;
     this.flags.add(name);
     this.items.reveal(name);
+    for (const g of this.gated) if (g.flag === name) g.c.setEnabled(g.on);
     this.events.push({ t: 'flag', name });
   }
 
@@ -276,6 +291,16 @@ export class World {
     const held = this.items.get(p.held);
     if (held?.kind === kind) return true;
     return p.belt.some((id) => this.items.get(id)?.kind === kind);
+  }
+
+  /** In hand, on the belt, or strapped to a vehicle rack. */
+  carrying(kind: ItemKind, good = true): boolean {
+    const p = this.player;
+    const ok = (it: WorldItem | undefined) => !!it && it.kind === kind && (!good || it.cond === 'good');
+    if (ok(this.items.get(p.held))) return true;
+    if (p.belt.some((id) => ok(this.items.get(id)))) return true;
+    for (const v of this.vehicles.values()) if (v.rack.some((id) => ok(this.items.get(id)))) return true;
+    return false;
   }
 
   heldItem(): WorldItem | undefined {
@@ -534,44 +559,46 @@ export class World {
       r: v.def.door.r,
       label: `${verb} the ${v.def.name}`,
       verb: 'tap',
-      priority: -1,
+      priority: 0,
       disabled: why ?? undefined,
       target: `vehicle:${v.key}`,
       run: () => this.enterVehicle(v),
     });
     if (v.def.rack) {
       const rp = v.world(v.def.rack);
-      const racked = this.items.get(v.rackItem);
-      if (held && !racked) {
+      const top = this.items.get(v.rack[v.rack.length - 1]);
+      if (held) {
+        const full = v.rack.length >= RACK_MAX;
         out.push({
           id: `vehicle:${v.key}:rack`,
           pos: rp,
-          r: 0.5,
+          r: 0.55,
           label: `Strap the ${itemLabel(held).toLowerCase()} to the rack`,
           verb: 'tap',
           priority: 2,
+          disabled: full ? 'Rack’s full' : undefined,
           target: `vehicle:${v.key}:rack`,
           run: () => {
             const it = this.ctx.takeHeld();
             if (!it) return;
             it.state = 'racked';
-            v.rackItem = it.id;
+            v.rack.push(it.id);
             this.events.push({ t: 'sfx', name: 'strap', pos: rp });
           },
         });
-      } else if (!held && racked) {
+      } else if (top) {
         out.push({
           id: `vehicle:${v.key}:unrack`,
           pos: rp,
-          r: 0.5,
-          label: `Take the ${itemLabel(racked).toLowerCase()} off the rack`,
+          r: 0.55,
+          label: `Take the ${itemLabel(top).toLowerCase()} off the rack`,
           verb: 'tap',
-          priority: 2,
+          priority: 0,
           target: `vehicle:${v.key}:rack`,
           run: () => {
-            v.rackItem = null;
-            racked.state = 'world';
-            this.giveHands(racked);
+            v.rack.pop();
+            top.state = 'world';
+            this.giveHands(top);
           },
         });
       }
@@ -780,15 +807,23 @@ export class World {
         if (!this.level.safe) v.integrity = clamp(v.integrity - v.impact * 0.28, 0, 1);
         if (v.occupied && v.impact > 0.25) this.hurt(v.impact * 6, 'crash');
       }
-      if (v.rackItem !== null) {
-        const it = this.items.get(v.rackItem);
-        if (it && v.def.rack) {
-          it.pos = v.world({ x: v.def.rack.x, y: v.def.rack.y + 0.15, z: v.def.rack.z });
+      if (v.def.rack) {
+        // Stack racked cargo up the rack, each piece riding on the one below.
+        let y = v.def.rack.y + 0.05;
+        for (const id of v.rack) {
+          const it = this.items.get(id);
+          if (!it) continue;
+          const sh = ITEM_DEFS[it.kind].shape;
+          const hh = sh.t === 'box' ? sh.hy : sh.r * 0.35;
+          it.pos = v.world({ x: v.def.rack.x, y: y + hh, z: v.def.rack.z });
           it.rot = v.rot;
+          y += hh * 2 + 0.02;
         }
       }
-      if (this.level.lostY !== undefined && v.pos.y < this.level.lostY) this.fail('vehicleLost');
-      if (v.integrity <= 0) this.fail('wrecked');
+      // Only the contract vehicle (the one you inspect) can lose you the job.
+      const contract = !!this.placements.get(v.key)?.def.inspect;
+      if (contract && this.level.lostY !== undefined && v.pos.y < this.level.lostY) this.fail('vehicleLost');
+      if (contract && v.integrity <= 0) this.fail('wrecked');
     }
     if (p.mode === 'drive' && p.vehicle) {
       const v = this.vehicle(p.vehicle);
@@ -1022,7 +1057,10 @@ export class World {
       if (!b.done(this)) break;
       b.finish?.(this);
       this.events.push({ t: 'objectiveDone', id: b.id });
-      if (b.checkpoint) this.events.push({ t: 'checkpoint', id: b.id });
+      if (b.checkpoint) {
+        this.checkpoint = b.id;
+        this.events.push({ t: 'checkpoint', id: b.id });
+      }
       this.beat++;
       this.beatStarted = false;
     }
@@ -1039,6 +1077,73 @@ export class World {
         this.say(line, 'Dispatch', 0);
       }
     }
+  }
+
+  /**
+   * Jump to just after a checkpoint beat: every beat up to it is finished,
+   * and each one's `restore` rebuilds the state it would have left behind.
+   */
+  restoreTo(beatId: string): void {
+    const beats = this.level.beats;
+    const idx = beats.findIndex((b) => b.id === beatId);
+    if (idx < 0) return;
+    for (let i = 0; i <= idx; i++) {
+      const b = beats[i];
+      if (b.hour !== undefined) this.hour = b.hour;
+      b.restore?.(this);
+      this.hintsFired.add(`${b.id}@restored`);
+    }
+    this.phys.step(1 / 60);
+    this.items.sync();
+    for (const v of this.vehicles.values()) v.sync(1 / 60);
+    for (const m of this.machines.values()) m.refresh(this.items, () => {});
+    this.beat = idx + 1;
+    this.beatStarted = false;
+    this.checkpoint = beatId;
+    this.events = [];
+  }
+
+  // --- restore helpers (checkpoints) ---------------------------------------------
+
+  /** Fit a fresh part in a machine slot, bolted down. */
+  fit(machine: string, slot: string, spec: ItemSpawn): void {
+    const m = this.machine(machine);
+    const old = this.items.get(m.state.slots[slot]);
+    if (old) this.items.take(old, 'gone');
+    const it = this.items.spawn({ ...spec, mounted: true });
+    m.mount(slot, it, 'tight');
+  }
+
+  /** Remove every loose item of a kind (it was used up before the checkpoint). */
+  consume(kind: ItemKind, count = 1): void {
+    for (const it of this.items.list) {
+      if (count <= 0) return;
+      if (it.kind === kind && it.state === 'world') {
+        this.items.take(it, 'gone');
+        count--;
+      }
+    }
+  }
+
+  /** Put a tool straight on the belt. */
+  giveBelt(kind: ItemKind): void {
+    if (this.hasItem(kind)) return;
+    const it = this.items.list.find((i) => i.kind === kind && i.state === 'world') ?? this.items.spawn({ kind, pos: this.player.pos });
+    const slot = this.player.belt.indexOf(null);
+    if (slot < 0) return;
+    this.items.take(it, 'belt');
+    this.player.belt[slot] = it.id;
+  }
+
+  givePocket(tag: string): void {
+    if (this.hasItem('key', tag)) return;
+    const it = this.items.list.find((i) => i.kind === 'key' && i.tag === tag);
+    if (it) this.items.take(it, 'pocket');
+    this.player.pockets.push({ kind: 'key', tag });
+  }
+
+  placeVehicle(key: string, pos: Vec3, yaw: number): void {
+    this.vehicle(key).place(pos, yaw);
   }
 
   drainEvents(): SimEvent[] {

@@ -214,7 +214,7 @@ class RoadPath {
       } else ys[i] = baseHeight(xs[i], zs[i]);
     }
     // Linear interpolation between pinned samples where both ends are pinned
-    // gives authored control; the natural height blends in between.
+    // gives authored control over the grade.
     let prev = -1;
     for (let i = 0; i < count; i++) {
       if (!isPinned[i]) continue;
@@ -222,25 +222,37 @@ class RoadPath {
         for (let j = prev + 1; j < i; j++) {
           const k = (this.ls[j] - this.ls[prev]) / (this.ls[i] - this.ls[prev] || 1);
           const lin = ys[prev] + (ys[i] - ys[prev]) * k;
-          // Mostly the authored line, a little of the land so it isn't dead flat.
-          ys[j] = lin * 0.85 + ys[j] * 0.15;
+          ys[j] = lin;
         }
       }
       prev = i;
     }
     const passes = def.smooth ?? 6;
     const radius = 10;
+    // Symmetric windows that never reach past a pin: a box average of a
+    // straight ramp is the ramp, so authored grades survive and only the
+    // natural stretches get evened out.
+    const lo = new Int32Array(count);
+    const hi = new Int32Array(count);
+    let pin = 0;
+    for (let i = 0; i < count; i++) {
+      if (isPinned[i]) pin = i;
+      lo[i] = pin;
+    }
+    pin = count - 1;
+    for (let i = count - 1; i >= 0; i--) {
+      if (isPinned[i]) pin = i;
+      hi[i] = pin;
+    }
     for (let p = 0; p < passes; p++) {
       const src = ys.slice();
       for (let i = 0; i < count; i++) {
         if (isPinned[i]) continue;
+        const r = Math.min(radius, i - lo[i], hi[i] - i);
+        if (r <= 0) continue;
         let s = 0;
-        let w = 0;
-        for (let j = Math.max(0, i - radius); j <= Math.min(count - 1, i + radius); j++) {
-          s += src[j];
-          w++;
-        }
-        ys[i] = s / w;
+        for (let j = i - r; j <= i + r; j++) s += src[j];
+        ys[i] = s / (2 * r + 1);
       }
     }
     this.ys = ys;

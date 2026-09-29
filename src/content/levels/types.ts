@@ -18,6 +18,10 @@ export interface StaticDef extends StaticShape {
   /** Render as this material; omit for collision-only (buildings draw themselves). */
   render?: string;
   color?: number;
+  /** Only solid once this flag is set (e.g. a rockslide). */
+  flag?: string;
+  /** Gone once this flag is set (e.g. a gate that opens). */
+  unflag?: string;
 }
 
 /** Render-only dressing, built by the client kit. */
@@ -97,6 +101,12 @@ export interface BeatDef {
   /** Dispatch nudges after N seconds on this beat. */
   hints?: [number, string][];
   checkpoint?: boolean;
+  /**
+   * Checkpoints: put the world into the state this beat leaves it in (parts
+   * fitted, flags set, player and vehicles placed). Restores run in order, so
+   * each only needs what its own stretch of the mission changed.
+   */
+  restore?: (w: World) => void;
   /** Time of day to ease toward during this beat (hours). */
   hour?: number;
 }

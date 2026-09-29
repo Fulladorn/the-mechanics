@@ -51,6 +51,8 @@ export interface CoverDef {
   id: string;
   label: string;
   pos: Vec3;
+  /** Where the grab point is once it's swung open (a raised hood's lip). */
+  openPos?: Vec3;
   r?: number;
   open?: boolean;
   /** Must be closed before driving. */
@@ -255,6 +257,16 @@ export class Machine {
     const c = this.comps.get(id);
     if (!c) throw new Error(`${this.def.id}: no component ${id}`);
     return c as T;
+  }
+
+  /** Pop a part straight out of a slot (no bolts to undo), e.g. kicked-out chocks. */
+  eject(slotId: string, items: ItemManager): WorldItem | undefined {
+    const it = items.get(this.state.slots[slotId]);
+    if (!it) return undefined;
+    this.state.slots[slotId] = null;
+    const c = this.comp<SlotDef>(slotId);
+    items.release(it, this.world(c.pos), this.rot, { x: 0, y: 1.2, z: 0 });
+    return it;
   }
 
   world(local: Vec3): Vec3 {
@@ -503,19 +515,24 @@ export class Machine {
     for (const c of this.def.components) {
       const at = this.world(c.pos);
       if (!near(at)) continue;
+      // Whatever sits under a closed lid can't be seen, let alone grabbed: the
+      // lid is the thing to aim at.
+      if (c.t !== 'cover' && 'needs' in c && c.needs?.some((n) => n.startsWith('open:') && !this.needMet(n, ctx))) continue;
       switch (c.t) {
         case 'slot':
           this.slotInteractables(c, ctx, held, out);
           break;
         case 'cover': {
           const open = s.covers[c.id];
+          const grab = open && c.openPos ? this.world(c.openPos) : at;
           out.push({
             id: tgt('cover', c.id),
-            pos: at,
+            pos: grab,
             r: c.r ?? 0.35,
             label: `${open ? 'Close' : 'Open'} the ${c.label.toLowerCase()}`,
             verb: 'tap',
-            priority: -1,
+            // A raised hood sits clear above the engine: aiming at it is deliberate.
+            priority: open && c.openPos ? 0 : -1,
             target: tgt('cover', c.id),
             run: () => {
               s.covers[c.id] = !open;

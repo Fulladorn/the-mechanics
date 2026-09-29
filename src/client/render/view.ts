@@ -14,8 +14,9 @@ import { Post } from './post';
 import { Particles } from './particles';
 import { MachineView } from './machineView';
 import { itemModel } from './itemModels';
-import { mesh, rbox } from './shapes';
+import { cyl, mesh, rbox } from './shapes';
 import { buildModel, buildProp, type PropBuild } from './kit/registry';
+import { Nature } from './foliage';
 import { ITEM_DEFS } from '../../sim/items';
 import type { SlotDef } from '../../sim/machine';
 
@@ -66,6 +67,7 @@ export class GameView {
   private shadeCheck = 0;
   private shade = 0;
   private tmpV = new THREE.Vector3();
+  private ambient = 1;
 
   constructor(
     readonly world: World,
@@ -90,7 +92,7 @@ export class GameView {
 
     const outdoor = level.env === 'mountain';
     this.sky = new Sky(this.scene, this.renderer, {
-      sunsetBearing: outdoor ? 250 : 235,
+      sunsetBearing: level.sunset ?? 250,
       shadowMap: settings.video.shadows ? (q === 'high' ? 8192 : q === 'med' ? 4096 : 2048) : 0,
       shadowSpan: outdoor ? 48 : 34,
       scenery: true,
@@ -100,13 +102,25 @@ export class GameView {
     SU.uFogBase.value = 0;
 
     // Ground.
-    const biome = new Biome(world.terrain, PALETTES[outdoor ? 'alpine' : 'depot']);
+    const rules = level.ground ?? [];
+    const biome = new Biome(world.terrain, PALETTES[outdoor ? 'alpine' : 'depot'], (x, z, out) => {
+      for (const r of rules) {
+        if (x < r.x0 || x > r.x1 || z < r.z0 || z > r.z1) continue;
+        if (r.color !== undefined) out.color.setHex(r.color);
+        out.grass = r.grass ?? 0;
+        out.flowers = 0;
+        return true;
+      }
+      return false;
+    });
     const bake = bakeGround(world.terrain, biome);
     const tv = new TerrainView(world.terrain, bake, q);
     this.scene.add(tv.group);
     const tex = groundTextures(world.terrain, bake);
     this.grass = new Grass(world.terrain, tex, GRASS_QUALITY[q]);
     this.scene.add(this.grass.group);
+
+    if (level.nature?.length) this.scene.add(new Nature(level.nature).group);
 
     // Static colliders that draw themselves as blocks.
     for (const s of level.statics) {
@@ -149,12 +163,24 @@ export class GameView {
       const pivot = new THREE.Group();
       pivot.position.set(d.def.hinge.x, d.def.hinge.y, d.def.hinge.z);
       pivot.rotation.y = d.def.yaw;
-      const leaf = mesh(rbox(d.def.width, d.def.height, 0.07, 0.02), MAT.wood(0x8a5a3a));
-      leaf.position.set(d.def.width / 2, d.def.height / 2, 0);
-      pivot.add(leaf);
-      const knob = mesh(rbox(0.05, 0.05, 0.12, 0.02), MAT.metal(0xc9a24a));
-      knob.position.set(d.def.width - 0.12, 1.0, 0);
-      pivot.add(knob);
+      if (d.def.style === 'rollup') {
+        // slatted door that rolls up into a drum under the lintel
+        const slats = new THREE.Group();
+        const n = Math.round(d.def.height / 0.22);
+        const mat = styl({ color: 0xb8453c, rough: 0.5, metal: 0.35, noise: 0.08 });
+        for (let i = 0; i < n; i++) slats.add(mesh(rbox(d.def.width, 0.2, 0.06, 0.03), mat, d.def.width / 2, 0.11 + i * 0.22, 0));
+        slats.name = 'slats';
+        pivot.add(slats);
+        pivot.add(mesh(cyl(0.35, 0.35, d.def.width + 0.4, 16), styl({ color: 0x5a5f68, rough: 0.5, metal: 0.5 }), d.def.width / 2, d.def.height + 0.35, -0.3).rotateZ(Math.PI / 2));
+        pivot.userData.rollup = true;
+      } else {
+        const leaf = mesh(rbox(d.def.width, d.def.height, 0.07, 0.02), MAT.wood(0x8a5a3a));
+        leaf.position.set(d.def.width / 2, d.def.height / 2, 0);
+        pivot.add(leaf);
+        const knob = mesh(rbox(0.05, 0.05, 0.12, 0.02), MAT.metal(0xc9a24a));
+        knob.position.set(d.def.width - 0.12, 1.0, 0);
+        pivot.add(knob);
+      }
       this.scene.add(pivot);
       this.doors.set(id, pivot);
     }
@@ -218,8 +244,26 @@ export class GameView {
     for (const [id, pivot] of this.doors) {
       const d = w.doors.get(id)!;
       const e = d.swing * d.swing * (3 - 2 * d.swing);
-      pivot.rotation.y = d.def.yaw + e * 1.6;
+      if (pivot.userData.rollup) {
+        const slats = pivot.getObjectByName('slats')!;
+        slats.children.forEach((s, i) => {
+          const base = 0.11 + i * 0.22;
+          const y = Math.min(d.def.height + 0.2, base + e * d.def.height);
+          s.position.y = y;
+          s.visible = y < d.def.height + 0.15;
+        });
+      } else pivot.rotation.y = d.def.yaw - e * 1.6;
     }
+    // Indoors: the open sky stops contributing so much ambient light.
+    let amb = 1;
+    const cp = this.camera.position;
+    for (const r of this.level.rooms ?? []) {
+      if (cp.x > r.x0 && cp.x < r.x1 && cp.z > r.z0 && cp.z < r.z1 && cp.y < r.y1) amb = Math.min(amb, r.ambient);
+    }
+    this.ambient += (amb - this.ambient) * Math.min(1, dt * 2.5);
+    this.sky.hemi.intensity *= this.ambient;
+    this.scene.environmentIntensity = 0.55 * (0.35 + 0.65 * this.ambient);
+    this.post.setExposure(this.settings.video.brightness * this.sky.exposure * (1 + (1 - this.ambient) * 0.22));
     for (const p of this.props) p.update?.(dt, this.clock, w);
     this.syncFlares(dt);
 

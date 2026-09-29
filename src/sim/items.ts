@@ -27,7 +27,8 @@ export type ItemKind =
   | 'winch'
   | 'lightbar'
   | 'tire'
-  | 'crate';
+  | 'crate'
+  | 'cone';
 
 export type Carry = 'belt' | 'hands' | 'pocket';
 
@@ -72,6 +73,7 @@ export const ITEM_DEFS: Record<ItemKind, ItemDef> = {
   winch: { kind: 'winch', label: 'Recovery Winch', carry: 'hands', heavy: true, mass: 20, shape: box(0.3, 0.12, 0.12) },
   lightbar: { kind: 'lightbar', label: 'Roof Light Bar', carry: 'hands', heavy: false, mass: 5, shape: box(0.5, 0.05, 0.08) },
   crate: { kind: 'crate', label: 'Sealed Crate', carry: 'hands', heavy: true, mass: 18, shape: box(0.25, 0.2, 0.2) },
+  cone: { kind: 'cone', label: 'Traffic Cone', carry: 'hands', heavy: false, mass: 1.2, shape: { t: 'cyl', r: 0.17, hh: 0.3 } },
 };
 
 export type ItemState = 'world' | 'held' | 'belt' | 'pocket' | 'mounted' | 'racked' | 'gone';

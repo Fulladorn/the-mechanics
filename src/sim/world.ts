@@ -282,6 +282,31 @@ export class World {
     return this.items.get(this.player.held);
   }
 
+  /** Nearest loose item of a kind (optionally only good ones). */
+  nearestItem(kind: ItemKind, good = true): WorldItem | undefined {
+    const p = this.playerPos();
+    let best: WorldItem | undefined;
+    let bd = Infinity;
+    for (const it of this.items.list) {
+      if (it.kind !== kind || !this.items.visible(it)) continue;
+      if (good && it.cond !== 'good') continue;
+      if (ITEM_DEFS[kind].fluid && it.fill < 0.05) continue;
+      const d = Math.hypot(it.pos.x - p.x, it.pos.z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = it;
+      }
+    }
+    return best;
+  }
+
+  /** Run `fn` the first time `flag` is claimed. */
+  once(flag: string, fn: () => void): void {
+    if (this.flags.has(flag)) return;
+    this.setFlag(flag);
+    fn();
+  }
+
   collectLore(id: string): void {
     if (this.lore.has(id)) return;
     this.lore.add(id);
@@ -971,6 +996,7 @@ export class World {
   }
 
   private stepDirector(dt: number): void {
+    this.level.tick?.(this, dt);
     const beats = this.level.beats;
     // Triggers run regardless of beat.
     for (const t of this.level.triggers ?? []) {

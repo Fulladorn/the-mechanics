@@ -49,7 +49,7 @@ export const PALETTES: Record<string, BiomePalette> = {
     dirt: 0xa07c55,
     gravel: 0xaaa08e,
     rut: 0x857765,
-    asphalt: 0x55575e,
+    asphalt: 0x6a6660,
     rock: 0x9a9184,
     rockDark: 0x716c74,
     snow: 0xf1f5fb,

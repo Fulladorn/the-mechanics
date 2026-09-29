@@ -268,7 +268,7 @@ export class Sky {
           float rim = pow(1.0 - nv.z, 2.0) * pow(max(dot(-back, normalize(uSunDir)), 0.0), 4.0);
           col += uLit * rim * 0.6;
           col = mix(col, uHorizon, smoothstep(900.0, 2600.0, vDist) * 0.55);
-          float a = smoothstep(1.0, 0.72, r2) * 0.95;
+          float a = smoothstep(1.0, 0.35, r2) * 0.92;
           gl_FragColor = vec4(col, a);
           #include <colorspace_fragment>
         }`,

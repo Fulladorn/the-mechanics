@@ -1,6 +1,6 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Quat, Vec3 } from '../shared/math';
-import { qYaw } from '../shared/math';
+import { qMul, qYaw } from '../shared/math';
 import type { Terrain } from './terrain';
 
 // Thin wrapper over Rapier: the one place the sim talks to the physics engine.
@@ -59,6 +59,8 @@ export interface StaticShape {
   /** box: half extents; cyl: x = radius, y = half height; ball: x = radius. */
   size: Vec3;
   yaw?: number;
+  /** Tilt about the (yawed) X axis — ramps. */
+  pitch?: number;
   surface?: Surface;
   owner?: string;
   friction?: number;
@@ -96,7 +98,7 @@ export class Physics {
     else desc = RAPIER.ColliderDesc.ball(s.size.x);
     desc
       .setTranslation(s.pos.x, s.pos.y, s.pos.z)
-      .setRotation(qYaw(s.yaw ?? 0))
+      .setRotation(s.pitch ? qMul(qYaw(s.yaw ?? 0), { x: Math.sin(s.pitch / 2), y: 0, z: 0, w: Math.cos(s.pitch / 2) }) : qYaw(s.yaw ?? 0))
       .setFriction(s.friction ?? 0.8)
       .setCollisionGroups(groups(s.owner?.startsWith('door:') ? G.DOOR | G.STATIC : G.STATIC, G.ALL));
     const c = this.world.createCollider(desc);

@@ -6,6 +6,7 @@ import type { BoltState, MachineDef } from '../../sim/machine';
 import type { StaticShape } from '../../sim/physics';
 import type { VehicleDef } from '../../sim/vehicle';
 import type { World } from '../../sim/world';
+import type { NatureInst } from '../nature';
 
 // What a mission is made of. The sim reads the gameplay parts (statics,
 // items, machines, stations, beats); the client reads the same file for the
@@ -79,6 +80,7 @@ export interface DoorDef {
   label?: string;
   /** Big doors (roll-up) open by script only. */
   scripted?: boolean;
+  style?: 'swing' | 'rollup';
 }
 
 export interface BeatDef {
@@ -140,6 +142,8 @@ export interface LevelDef {
   hour: number;
   statics: StaticDef[];
   props: PropDef[];
+  /** Trees, bushes, rocks (their colliders must also be in statics). */
+  nature?: NatureInst[];
   items: ItemSpawn[];
   machines: MachinePlacement[];
   stations: StationDef[];
@@ -164,4 +168,12 @@ export interface LevelDef {
   outro?: string;
   /** First line from Dispatch. */
   briefing: string;
+  /** Per-step custom logic (gates, scoring, scripted beats). */
+  tick?: (w: World, dt: number) => void;
+  /** Indoor volumes: ambient light is scaled while the camera is inside. */
+  rooms?: { x0: number; z0: number; x1: number; z1: number; y1: number; ambient: number }[];
+  /** Compass bearing of sunset, degrees. */
+  sunset?: number;
+  /** Ground paint overrides: no grass, optional colour (floors, lots). */
+  ground?: { x0: number; z0: number; x1: number; z1: number; color?: number; grass?: number }[];
 }

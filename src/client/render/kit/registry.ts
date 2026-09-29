@@ -3,6 +3,8 @@ import type { PropDef } from '../../../content/levels/types';
 import type { World } from '../../../sim/world';
 import { buildBetsy } from '../vehicles/betsy';
 import type { VehicleModel } from '../vehicles/parts';
+import { BUILDING } from './building';
+import { PROPS as KIT_PROPS } from './props';
 
 // Name → builder tables for vehicle models and level props. Levels only ever
 // refer to art by these names, so the sim and tests never import three.js.
@@ -18,12 +20,20 @@ export interface PropBuild {
 type PropBuilder = (p: PropDef, w: World) => PropBuild | null;
 
 const PROPS = new Map<string, PropBuilder>();
+let registered = false;
+function ensure(): void {
+  if (registered) return;
+  registered = true;
+  registerProps(BUILDING as Record<string, PropBuilder>);
+  registerProps(KIT_PROPS as Record<string, PropBuilder>);
+}
 
 export function registerProps(table: Record<string, PropBuilder>): void {
   for (const [k, v] of Object.entries(table)) PROPS.set(k, v);
 }
 
 export function buildProp(p: PropDef, w: World): PropBuild | null {
+  ensure();
   const b = PROPS.get(p.kind);
   if (!b) return null;
   const built = b(p, w);

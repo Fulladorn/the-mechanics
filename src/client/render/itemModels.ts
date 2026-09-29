@@ -444,6 +444,14 @@ export function itemModel(it: Pick<WorldItem, 'kind' | 'cond' | 'fill' | 'varian
     case 'fuse':
       g = fuse();
       break;
+    case 'cone': {
+      g = new THREE.Group();
+      const orange = styl({ color: 0xff6a1f, rough: 0.5, noise: 0.05 });
+      g.add(mesh(lathe('cone', [[0.02, 0.3], [0.05, 0.28], [0.15, -0.26], [0.16, -0.27], [0.0, -0.27]], 16), orange));
+      g.add(mesh(cyl(0.105, 0.125, 0.09, 16, true), styl({ color: 0xf6f4ee, rough: 0.4 }), 0, -0.03, 0));
+      g.add(mesh(rbox(0.36, 0.035, 0.36, 0.01), orange, 0, -0.28, 0));
+      break;
+    }
     default:
       g = new THREE.Group();
       g.add(mesh(rbox(0.2, 0.2, 0.2), MAT.paint(0xff00ff)));

@@ -1,4 +1,5 @@
-import type { TerrainDef } from '../../sim/terrain';
+import { Terrain, type TerrainDef } from '../../sim/terrain';
+import { natureColliders, scatter } from '../nature';
 import { BETSY_MACHINE, BETSY_VEHICLE } from '../vehicles/betsy';
 import type { LevelDef } from './types';
 
@@ -16,7 +17,26 @@ const TERRAIN: TerrainDef = {
 };
 
 export function makeSandbox(): LevelDef {
+  const t = Terrain.for(TERRAIN);
+  const away = (x: number, z: number) => (Math.hypot(x, z) > 22 ? 1 : 0);
+  const nature = scatter(
+    t,
+    [
+      { kind: 'pine', count: 60, where: away, scale: [0.8, 1.3], gap: 4 },
+      { kind: 'fir', count: 30, where: away, scale: [0.8, 1.2], gap: 4 },
+      { kind: 'broadleaf', count: 25, where: away, scale: [0.8, 1.2], gap: 5 },
+      { kind: 'birch', count: 20, where: away, scale: [0.8, 1.1], gap: 3 },
+      { kind: 'bush', count: 60, where: away, scale: [0.7, 1.3], gap: 2 },
+      { kind: 'boulder', count: 15, where: away, scale: [0.7, 1.5], gap: 3 },
+      { kind: 'rock', count: 40, where: () => 1, scale: [0.4, 1.0], gap: 2 },
+      { kind: 'stump', count: 8, where: away, scale: [0.8, 1.2] },
+      { kind: 'log', count: 6, where: away, scale: [0.8, 1.2] },
+    ],
+    99,
+    90,
+  );
   return {
+    nature,
     id: 'sandbox',
     title: 'SANDBOX',
     subtitle: 'Physics playground',
@@ -26,6 +46,7 @@ export function makeSandbox(): LevelDef {
     statics: [
       { shape: 'box', pos: { x: -12, y: 1, z: -10 }, size: { x: 4, y: 1, z: 0.3 }, render: 'concrete' },
       { shape: 'box', pos: { x: 12, y: 0.4, z: 6 }, size: { x: 1.5, y: 0.4, z: 1.5 }, render: 'crate', color: 0xb5793c },
+      ...natureColliders(nature),
     ],
     props: [],
     items: [

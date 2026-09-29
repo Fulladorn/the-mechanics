@@ -218,7 +218,8 @@ for (int i = 0; i < 4; i++) {
   p.xz += (dl > 0.001 ? d / dl : vec2(0.0)) * k * bend * 0.9;
   p.y -= k * bend * 0.45;
 }
-vec3 transformed = p;
+// culled blades collapse to a single point under the ground
+vec3 transformed = keep > 0.5 && hgt > 0.02 ? p : vec3(wp.x, terrainH(wp) - 1.0, wp.y);
 vec3 g = pow(gs.rgb, vec3(2.2));
 ${
   flower

@@ -71,7 +71,7 @@ export function makeRidge(): LevelDef {
     e: [win(2.6, 4.4)],
   }, 'logs', 0x9a6a44);
   k.prop('roof', { x: R.x, y: ry + 3, z: R.z }, Math.PI / 2, { w: 8.2, d: 11.2, rise: 1.8, color: 0x3f5b3a });
-  k.prop('slab', { x: R.x, y: ry + 0.02, z: R.z }, 0, { w: 9.6, d: 6.6, mat: 'planks' });
+  k.prop('slab', { x: R.x, y: ry + 0.02, z: R.z }, 0, { w: 9.9, d: 6.9, mat: 'planks' });
   k.prop('porch', { x: rx0 - 1.2, y: ry, z: R.z - 0.3 }, Math.PI / 2, { w: 5, d: 2.2 });
   k.prop('sign', { x: rx0 - 0.2, y: ry + 3.5, z: R.z }, -Math.PI / 2, { text: 'KESTREL RIDGE · RANGER STATION', w: 5, h: 0.7, style: 'wood' });
   furnish(k, 'workbench', R.x + 3.4, ry, rz0 + 0.55, 0);
@@ -81,6 +81,11 @@ export function makeRidge(): LevelDef {
   k.prop('lamp', { x: R.x, y: ry + 2.9, z: R.z }, 0, { color: 0xffd9a8, power: 1.6, range: 8 });
   furnish(k, 'shelf', rx1 - 0.35, ry, R.z - 1.5, -Math.PI / 2, { fill: 'supplies' });
   k.prop('woodStove', { x: R.x - 3.8, y: ry, z: rz1 - 0.7 }, 0);
+  // lived in: a cot, a table by the stove, rafters overhead
+  furnish(k, 'cot', R.x + 2.3, ry, rz1 - 0.62, 0);
+  k.prop('rug', { x: R.x - 0.4, y: ry + 0.03, z: R.z + 1.5 }, 0, { w: 2.4, d: 1.7 });
+  furnish(k, 'crewTable', R.x - 0.4, ry, R.z + 1.5, 0.1);
+  k.prop('trusses', { x: R.x, y: ry + 3, z: R.z }, Math.PI / 2, { w: 7.2, d: 10, rise: 1.8, n: 2, wood: true });
   k.prop('flagPole', at(rx0 - 4, R.z + 5), 0);
   k.prop('woodpile', at(rx1 + 1.2, R.z + 2), Math.PI / 2);
   k.block(rx1 + 1.2, ry, R.z + 2, 0.9, 1.1, 2.4, 0, 'wood');
@@ -204,6 +209,11 @@ export function makeRidge(): LevelDef {
   k.box({ x: Mi.x - 7, y: my + 3.1, z: Mi.z }, { x: 7, y: 0.2, z: 2 }, 0, 'rock');
   k.box({ x: Mi.x - 14.2, y: my + 1.4, z: Mi.z }, { x: 0.2, y: 1.6, z: 2 }, 0, 'rock');
   k.prop('mineTunnel', { x: Mi.x, y: my, z: Mi.z }, 0, { len: 14 });
+  // the hill the drift runs into (drawn by mineTunnel): keep people out of it
+  for (const sd of [-1, 1]) {
+    k.box({ x: Mi.x - 8.3, y: my + 2, z: Mi.z + sd * 3.95 }, { x: 7.4, y: 3, z: 1.55 }, 0, 'rock');
+    k.box({ x: Mi.x - 8.3, y: my + 2, z: Mi.z + sd * 7.75 }, { x: 5.3, y: 3, z: 2.25 }, 0, 'rock');
+  }
   k.prop('mineCart', { x: Mi.x - 5, y: my, z: Mi.z + 0.6 }, 0);
   k.block(Mi.x - 5, my, Mi.z + 0.6, 1.4, 1.1, 0.9, 0, 'metal');
   k.prop('lantern', { x: Mi.x - 12, y: my + 1.2, z: Mi.z - 1.5 }, 0);
@@ -228,6 +238,10 @@ export function makeRidge(): LevelDef {
   const wreck = at(-66, 186);
   k.prop('van', { x: wreck.x, y: wreck.y + 1.0, z: wreck.z }, 2.3, { color: 0xd9d3c4, stripe: 0xff7a2f, wrecked: true });
   k.block(wreck.x, wreck.y, wreck.z, 2.0, 2.0, 4.8, 2.3, 'metal');
+  // what it was carrying: sealed crates, one split open, thrown clear
+  furnish(k, 'crate', wreck.x + 2.6, wreck.y, wreck.z + 1.8, 0.7);
+  k.prop('crate', at(wreck.x - 1.2, wreck.z + 3.4, -0.25), 1.9, undefined, 0.7);
+  k.prop('crate', at(wreck.x + 3.8, wreck.z - 1.2, -0.3), 0.3, undefined, 0.6);
 
   // --- extraction lot ---------------------------------------------------------------------------
   const L = RIDGE.lot;
@@ -555,7 +569,12 @@ export function makeRidge(): LevelDef {
         if (!w.carrying('radiatorHose') && !w.systemOk(M, 'coolant')) return w.nearestItem('radiatorHose')?.pos ?? rvBin;
         return rvFiller;
       },
-      start: (w) => w.say('Wolves come down to the lake at dusk. Keep a flare handy — they won’t go near one.'),
+      start: (w) =>
+        w.say(
+          w.hasItem('flare')
+            ? 'Wolves come down to the lake at dusk. Flare’s on your belt — pick it with the number keys and click to light it. They won’t come near one.'
+            : 'Wolves come down to the lake at dusk, and you’ve no flare. There’s a box in the van and more at the ranger station. Get one.',
+        ),
       done: (w) =>
         (w.carrying('fuelHose') || w.systemOk(M, 'fuel')) &&
         (w.carrying('radiatorHose') || w.systemOk(M, 'coolant')) &&
@@ -631,6 +650,13 @@ export function makeRidge(): LevelDef {
     statics: k.statics,
     props: k.props,
     nature,
+    ground: [
+      // the drift floor (no grass under the rock) and the spoil apron out front
+      { x0: Mi.x - 15, z0: Mi.z - 2.3, x1: Mi.x + 0.4, z1: Mi.z + 2.3, color: 0x4e4338, grass: 0 },
+      { x0: Mi.x - 2, z0: Mi.z - 6, x1: Mi.x + 10, z1: Mi.z + 6, color: 0x8b7a62, grass: 0.1, feather: 3.5 },
+      // the Company's pickup lot: a graded gravel pad
+      { x0: RIDGE.lot.x - 15, z0: RIDGE.lot.z - 13, x1: RIDGE.lot.x + 17, z1: RIDGE.lot.z + 11, color: 0x8e8574, grass: 0, feather: 2.5 },
+    ],
     items,
     machines: [
       {
@@ -696,6 +722,7 @@ export function makeRidge(): LevelDef {
         id: 'mapBoard',
         pos: { x: R.x - 1, y: ry + 1.7, z: rz0 + 0.2 },
         r: 0.8,
+        box: { hx: 0.98, hy: 0.44, hz: 0.08 },
         label: 'Read the trail map',
         verb: 'tap',
         priority: 1,
@@ -706,8 +733,9 @@ export function makeRidge(): LevelDef {
       },
       {
         id: 'pullCord',
-        pos: { x: gen.x, y: gy(gen.x, gen.z) + 0.7, z: gen.z },
-        r: 0.5,
+        // the pull handle on the engine end (generator model: local 0.26, 0.38, 0.36)
+        pos: { x: gen.x - 0.36, y: gy(gen.x, gen.z) + 0.38, z: gen.z + 0.26 },
+        r: 0.24,
         label: (w) => (w.flag('millPower') ? 'Generator running' : 'Pull the start cord'),
         verb: 'hold',
         time: 1.4,
@@ -724,6 +752,7 @@ export function makeRidge(): LevelDef {
         id: 'rvBin',
         pos: rvBin,
         r: 0.6,
+        box: { hx: 0.5, hy: 0.3, hz: 0.1, yaw: rv.yaw },
         label: 'Open the RV storage bin',
         verb: 'tap',
         priority: 1,
@@ -781,8 +810,9 @@ export function makeRidge(): LevelDef {
       },
       {
         id: 'vanLog',
-        pos: { x: wreck.x, y: wreck.y + 1.2, z: wreck.z },
-        r: 1.2,
+        // through the smashed windscreen at the nose (the van lies on its side)
+        pos: { x: wreck.x - 2.6 * Math.sin(2.3), y: wreck.y + 1.0, z: wreck.z - 2.6 * Math.cos(2.3) },
+        r: 0.7,
         label: 'Search the wrecked van',
         verb: 'hold',
         time: 1.2,

@@ -1,4 +1,5 @@
-import type { Vec3 } from '../shared/math';
+import type { Quat, Vec3 } from '../shared/math';
+import { qConj, qRotate } from '../shared/math';
 
 // What the crosshair can act on. Every gameplay system (items, machines,
 // stations, vehicles) contributes candidates each tick; `pickFocus` chooses the
@@ -20,12 +21,22 @@ export interface Gauge {
   hi: number;
 }
 
+/** An oriented box target, centred on the interactable's `pos`. */
+export interface TargetBox {
+  hx: number;
+  hy: number;
+  hz: number;
+  rot?: Quat;
+}
+
 export interface Interactable {
   /** Stable id: holds and highlights key off it. */
   id: string;
   pos: Vec3;
-  /** Hit radius. */
+  /** Hit radius (for boxes: a bounding radius, used for culling and aim assist). */
   r: number;
+  /** Hit the whole face of something flat or oblong (doors, boards, lockers). */
+  box?: TargetBox;
   label: string;
   verb: Verb;
   /** Seconds, for hold/loosen. */
@@ -65,6 +76,34 @@ function raySphere(ray: Ray, c: Vec3, r: number): number {
   return t1 >= 0 ? 0 : -1; // inside the sphere counts as a hit at 0
 }
 
+/** Distance along the ray into an oriented box (slab test), or -1 when missed; inside = 0. */
+export function rayBox(ray: Ray, c: Vec3, b: TargetBox): number {
+  const inv = b.rot ? qConj(b.rot) : null;
+  const rel = { x: ray.origin.x - c.x, y: ray.origin.y - c.y, z: ray.origin.z - c.z };
+  const o = inv ? qRotate(inv, rel) : rel;
+  const d = inv ? qRotate(inv, ray.dir) : ray.dir;
+  let tmin = -Infinity;
+  let tmax = Infinity;
+  for (const [oa, da, h] of [
+    [o.x, d.x, b.hx],
+    [o.y, d.y, b.hy],
+    [o.z, d.z, b.hz],
+  ]) {
+    if (Math.abs(da) < 1e-9) {
+      if (oa < -h || oa > h) return -1;
+      continue;
+    }
+    let t1 = (-h - oa) / da;
+    let t2 = (h - oa) / da;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tmin = Math.max(tmin, t1);
+    tmax = Math.min(tmax, t2);
+    if (tmin > tmax) return -1;
+  }
+  if (tmax < 0) return -1;
+  return Math.max(0, tmin);
+}
+
 function perpDist(ray: Ray, c: Vec3): number {
   const dx = c.x - ray.origin.x;
   const dy = c.y - ray.origin.y;
@@ -93,13 +132,15 @@ export function pickFocus(
     for (const c of candidates) {
       const pri = c.priority ?? 0;
       if (pri < 0 !== fallback) continue;
-      const t = raySphere(ray, c.pos, c.r);
+      const t = c.box ? rayBox(ray, c.pos, c.box) : raySphere(ray, c.pos, c.r);
       if (t < 0 || t > reach) continue;
       // Score: distance along the ray, plus how far the crosshair is from the
       // target's centre (so of two overlapping lug nuts, the one you're
       // pointing at wins), minus a bonus per priority level (so a nut beats
-      // the wheel it sits on).
-      const s = t + 3 * perpDist(ray, c.pos) - Math.max(0, pri) * 0.2;
+      // the wheel it sits on). A box you're inside the face of counts as
+      // dead centre — it's big on purpose.
+      const off = c.box ? Math.min(perpDist(ray, c.pos), 0.15) : perpDist(ray, c.pos);
+      const s = t + 3 * off - Math.max(0, pri) * 0.2;
       if (s >= bestScore) continue;
       if (occluded?.(c, t)) continue;
       best = c;

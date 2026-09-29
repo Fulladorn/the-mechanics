@@ -30,6 +30,8 @@ export class CameraRig {
   private focusT = 0;
   focusTo: { pos: THREE.Vector3; quat: THREE.Quaternion } | null = null;
   shake = 0;
+  /** Solid-world ray test for the chase arm: distance to the first hit, or null. */
+  obstruct?: (from: THREE.Vector3, dir: THREE.Vector3, len: number) => number | null;
 
   constructor(
     readonly camera: THREE.PerspectiveCamera,
@@ -94,6 +96,23 @@ export class CameraRig {
       const floor = this.terrain.heightAt(px, pz) + 0.6;
       const py = target.y + (want.y - target.y) * k;
       if (py < floor) want.y += (floor - py) / k;
+    }
+    // pull the arm in rather than put a tree trunk or a wall in front of the lens
+    if (this.obstruct) {
+      const from = target.clone().add(new THREE.Vector3(0, 1.2, 0));
+      const arm = want.clone().sub(from);
+      const len = arm.length();
+      if (len > 0.5) {
+        const hit = this.obstruct(from, arm.clone().divideScalar(len), len + 0.4);
+        if (hit !== null) {
+          const keep = Math.max(1.4, hit - 0.45);
+          if (keep < len) {
+            want.copy(from).addScaledVector(arm, keep / len);
+            // snap in (never ease through the obstacle), ease back out
+            if (this.chaseInit && this.chasePos.distanceTo(from) > keep) this.chasePos.copy(want);
+          }
+        }
+      }
     }
     if (!this.chaseInit) {
       this.chasePos.copy(want);

@@ -193,7 +193,7 @@ describe('level 1: the ridge job', () => {
     bot.holdAt(filler, 1.8, /Pour fuel/);
     expect(w.systemOk('generator', 'fuel')).toBe(true);
     drop();
-    const cord = { ...gen.pos, y: gen.pos.y + 0.7 };
+    const cord = w.level.stations.find((s) => s.id === 'pullCord')!.pos;
     bot.approach(cord, 1.2, outside(gen, cord, 1.5));
     bot.holdAt(cord, 1.6, /Pull the start cord/);
     bot.tick(2);

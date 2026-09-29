@@ -58,6 +58,8 @@ export interface StationDef {
   id: string;
   pos: Vec3;
   r: number;
+  /** Target the whole face of the thing (half-extents, yaw), centred on `pos`. */
+  box?: { hx: number; hy: number; hz: number; yaw?: number };
   label: string | ((w: World) => string);
   verb: 'tap' | 'hold';
   time?: number;
@@ -187,5 +189,5 @@ export interface LevelDef {
   /** Title-screen backdrop: a slow orbit around this point. */
   attract?: { target: Vec3; radius: number; height: number; hour?: number; speed?: number };
   /** Ground paint overrides: no grass, optional colour (floors, lots). */
-  ground?: { x0: number; z0: number; x1: number; z1: number; color?: number; grass?: number }[];
+  ground?: { x0: number; z0: number; x1: number; z1: number; color?: number; grass?: number; /** Blend in over this many metres from the edge. */ feather?: number }[];
 }

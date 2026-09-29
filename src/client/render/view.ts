@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { G } from '../../sim/physics';
 import type { World } from '../../sim/world';
 import type { LevelDef } from '../../content/levels/types';
 import type { Settings } from '../settings';
@@ -6,12 +7,12 @@ import { Sky } from './sky';
 import { SU, styl, MAT } from './stylized';
 import { Biome, PALETTES } from './biome';
 import { TerrainView, bakeGround, groundTextures } from './terrainView';
-import { Grass, GRASS_QUALITY } from './grass';
+import { Grass, GRASS_PUSHERS, GRASS_QUALITY } from './grass';
 import { CameraRig } from './cameraRig';
 import { Highlight } from './highlight';
 import { Viewmodel } from './viewmodel';
 import { Post } from './post';
-import { Particles, PARTICLE_SCALE } from './particles';
+import { Particles, PARTICLE_LIGHT, PARTICLE_SCALE } from './particles';
 import { Water } from './water';
 import { WolfPack } from './wolves';
 import { MachineView } from './machineView';
@@ -70,6 +71,7 @@ export class GameView {
   private shade = 0;
   private tmpV = new THREE.Vector3();
   private tmpV2 = new THREE.Vector2();
+  private tmpC = new THREE.Color();
   private water?: Water;
   private wolves?: WolfPack;
   private ambient = 1;
@@ -111,9 +113,11 @@ export class GameView {
     const biome = new Biome(world.terrain, PALETTES[outdoor ? 'alpine' : 'depot'], (x, z, out) => {
       for (const r of rules) {
         if (x < r.x0 || x > r.x1 || z < r.z0 || z > r.z1) continue;
-        if (r.color !== undefined) out.color.setHex(r.color);
-        out.grass = r.grass ?? 0;
-        out.flowers = 0;
+        const inside = Math.min(x - r.x0, r.x1 - x, z - r.z0, r.z1 - z);
+        const k = r.feather ? THREE.MathUtils.smoothstep(inside, 0, r.feather) : 1;
+        if (r.color !== undefined) out.color.lerp(this.tmpC.setHex(r.color), k);
+        out.grass += ((r.grass ?? 0) - out.grass) * k;
+        out.flowers *= 1 - k;
         return true;
       }
       return false;
@@ -181,7 +185,9 @@ export class GameView {
         const slats = new THREE.Group();
         const n = Math.round(d.def.height / 0.22);
         const mat = styl({ color: 0xb8453c, rough: 0.5, metal: 0.35, noise: 0.08 });
-        for (let i = 0; i < n; i++) slats.add(mesh(rbox(d.def.width, 0.2, 0.06, 0.03), mat, d.def.width / 2, 0.11 + i * 0.22, 0));
+        // slats overlap like real roller-door laths (alternately stepped a few
+        // mm in depth so the overlap never z-fights): no daylight through it
+        for (let i = 0; i < n; i++) slats.add(mesh(rbox(d.def.width, 0.27, 0.05, 0.02), mat, d.def.width / 2, 0.11 + i * 0.22, i % 2 ? 0.006 : -0.006));
         slats.name = 'slats';
         pivot.add(slats);
         pivot.add(mesh(cyl(0.35, 0.35, d.def.width + 0.4, 16), styl({ color: 0x5a5f68, rough: 0.5, metal: 0.5 }), d.def.width / 2, d.def.height + 0.35, -0.3).rotateZ(Math.PI / 2));
@@ -201,6 +207,10 @@ export class GameView {
     this.particles = new Particles(this.scene, q, (x, z) => world.terrain.heightAt(x, z));
     this.highlight = new Highlight(this.scene);
     this.rig = new CameraRig(this.camera, world.terrain);
+    this.rig.obstruct = (from, dir, len) => {
+      const hit = world.phys.castRay({ x: from.x, y: from.y, z: from.z }, { x: dir.x, y: dir.y, z: dir.z }, len, G.STATIC | G.DOOR);
+      return hit ? hit.toi : null;
+    };
     this.vm = new Viewmodel(innerWidth / innerHeight, settings.video.fov);
     this.scene.add(this.vm.flashlight, this.vm.flashlight.target);
     this.post = new Post(this.renderer, this.scene, this.camera, q, settings.video.postfx);
@@ -317,12 +327,18 @@ export class GameView {
     // Shadows, sky and grass follow the camera.
     const focusPt = driving ? this.machines.get(p.vehicle!)!.root.position : this.camera.position;
     this.sky.follow(focusPt);
-    const pushers: { x: number; z: number; r: number; k: number }[] = [];
-    if (!driving) pushers.push({ x: p.pos.x, z: p.pos.z, r: 0.7, k: 1 });
-    for (const v of w.vehicles.values()) {
-      pushers.push({ x: v.pos.x, z: v.pos.z, r: 1.6, k: 1 });
-      if (pushers.length >= 4) break;
-    }
+    // Grass bends away from the player, the nearest vehicles, and loose items
+    // (so a dropped part never vanishes into a meadow).
+    const pushers: { x: number; z: number; r: number; k: number; d: number }[] = [];
+    if (!driving) pushers.push({ x: p.pos.x, z: p.pos.z, r: 0.7, k: 1, d: 0 });
+    const near = (x: number, z: number) => Math.hypot(x - focusPt.x, z - focusPt.z);
+    const vs = [...w.vehicles.values()].map((v) => ({ x: v.pos.x, z: v.pos.z, r: 1.6, k: 1, d: near(v.pos.x, v.pos.z) })).filter((v) => v.d < 60);
+    pushers.push(...vs.sort((a, b) => a.d - b.d).slice(0, 3));
+    const loose = w.items.list
+      .filter((it) => w.items.visible(it))
+      .map((it) => ({ x: it.pos.x, z: it.pos.z, r: 0.55, k: 1, d: near(it.pos.x, it.pos.z) }))
+      .filter((it) => it.d < 30);
+    pushers.push(...loose.sort((a, b) => a.d - b.d).slice(0, GRASS_PUSHERS - pushers.length));
     this.grass?.update(this.camera.position, pushers);
 
     // --- focus glow + ghosts -----------------------------------------------------------
@@ -366,6 +382,16 @@ export class GameView {
       }
     }
 
+    // smoke and dust take the scene's light: pale grey by day, dim at night
+    {
+      const sl = PARTICLE_LIGHT.value;
+      const h = this.sky.hemi;
+      const sn = this.sky.sun;
+      sl.copy(h.color).multiplyScalar(h.intensity * 0.55).add(this.tmpC.copy(sn.color).multiplyScalar(sn.intensity * 0.22 * this.ambient));
+      sl.r = Math.min(1, sl.r);
+      sl.g = Math.min(1, sl.g);
+      sl.b = Math.min(1, sl.b);
+    }
     PARTICLE_SCALE.value = this.renderer.getDrawingBufferSize(this.tmpV2).y / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) / 2));
     this.particles.update(dt);
     this.post.render(dt, this.scene, this.camera);

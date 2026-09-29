@@ -189,7 +189,7 @@ function trusses(p: PropDef): PropBuild {
   const d = num(p, 'd');
   const rise = num(p, 'rise', 2.4);
   const n = num(p, 'n', 4);
-  const steel = styl({ color: 0x5b6472, rough: 0.55, metal: 0.6 });
+  const steel = p.p?.wood ? MAT.wood(num(p, 'color', 0x7a5232)) : styl({ color: 0x5b6472, rough: 0.55, metal: 0.6 });
   const half = w / 2;
   const slope = Math.hypot(half, rise);
   const ang = Math.atan2(rise, half);

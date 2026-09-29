@@ -37,7 +37,7 @@ export const RIDGEBACK_VEHICLE: VehicleDef = {
   steer: { max: 0.56, atSpeed: 0.26, rate: 2.3 },
   seat: { x: -0.38, y: 0.95, z: 0.05 },
   exit: { x: -1.9, y: -0.6, z: -0.1 },
-  door: { pos: { x: -1.0, y: 0.35, z: -0.1 }, r: 0.7 },
+  door: { pos: { x: -0.95, y: 0.45, z: -0.2 }, r: 0.48 },
 };
 
 const clamp2 = (a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }) => [
@@ -54,7 +54,7 @@ export const RIDGEBACK_MACHINE: MachineDef = {
     { t: 'slot', id: 'chockL', label: 'Left chock', accepts: 'chock', pos: { x: -TRACK, y: RIDGEBACK_GROUND + 0.09, z: FRONT - 0.52 }, r: 0.28 },
     { t: 'slot', id: 'chockR', label: 'Right chock', accepts: 'chock', pos: { x: TRACK, y: RIDGEBACK_GROUND + 0.09, z: FRONT - 0.52 }, r: 0.28 },
 
-    { t: 'cover', id: 'hood', label: 'Hood', pos: { x: 0, y: 0.32, z: -2.05 }, openPos: { x: 0, y: 1.45, z: -1.5 }, r: 0.45, closeToDrive: true },
+    { t: 'cover', id: 'hood', label: 'Hood', pos: { x: 0, y: 0.32, z: -2.05 }, openPos: { x: 0, y: 1.45, z: -1.5 }, box: { pos: { x: 0, y: 0.34, z: -1.62 }, hx: 0.8, hy: 0.08, hz: 0.68 }, r: 0.45, closeToDrive: true },
     wheelSlot('wheelFL', 'Front-left wheel', { x: -TRACK, y: HUB_Y, z: FRONT }, -1, 'jackFL', 'on the ranger’s pickup'),
     wheelSlot('wheelFR', 'Front-right wheel', { x: TRACK, y: HUB_Y, z: FRONT }, 1, 'jackFR'),
     wheelSlot('wheelRL', 'Rear-left wheel', { x: -TRACK, y: HUB_Y, z: REAR }, -1, 'jackRL'),
@@ -228,7 +228,7 @@ export const LOGGING_TRUCK: MachineDef = {
   name: 'Logging truck',
   inspected: true,
   components: [
-    { t: 'cover', id: 'box', label: 'Battery box lid', pos: { x: 1.2, y: -0.2, z: -0.6 }, r: 0.35 },
+    { t: 'cover', id: 'box', label: 'Battery box lid', pos: { x: 1.2, y: -0.2, z: -0.6 }, box: { pos: { x: 1.2, y: -0.25, z: -0.6 }, hx: 0.27, hy: 0.2, hz: 0.32 }, r: 0.35 },
     {
       t: 'slot',
       id: 'battery',
@@ -251,7 +251,7 @@ export const GENERATOR: MachineDef = {
   id: 'generator',
   name: 'Generator',
   inspected: true,
-  components: [{ t: 'fluid', id: 'fuel', label: 'Generator tank', fluid: 'fuel', pos: { x: 0.2, y: 0.55, z: 0 }, level: 0, target: 0.3, perContainer: 0.5 }],
+  components: [{ t: 'fluid', id: 'fuel', label: 'Generator tank', fluid: 'fuel', pos: { x: 0.2, y: 0.72, z: 0 }, level: 0, target: 0.3, perContainer: 0.5 }],
   systems: [{ id: 'fuel', label: 'Generator fuel', icon: 'fuel', required: true, parts: ['fuel'], fault: '' }],
 };
 

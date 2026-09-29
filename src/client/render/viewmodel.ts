@@ -18,6 +18,7 @@ function buildHand(side: -1 | 1): THREE.Group {
   const dark = styl({ color: 0xb87a2c, rough: 0.8, noFog: true });
   const sleeve = styl({ color: 0x2f4a6e, rough: 0.9, noFog: true });
   h.add(mesh(rbox(0.15, 0.11, 0.17, 0.045), glove));
+  const fingers: THREE.Group[] = [];
   for (let i = 0; i < 4; i++) {
     const f = new THREE.Group();
     const s1 = mesh(capsule(0.021, 0.05, 3, 6), glove);
@@ -29,6 +30,7 @@ function buildHand(side: -1 | 1): THREE.Group {
     f.add(s2);
     f.position.set(-0.048 + i * 0.032, 0.012, -0.088);
     h.add(f);
+    fingers.push(f);
   }
   const thumb = mesh(capsule(0.024, 0.05, 3, 6), glove);
   thumb.rotation.set(Math.PI / 2.4, 0, side * 0.6);
@@ -45,6 +47,8 @@ function buildHand(side: -1 | 1): THREE.Group {
   arm.rotation.x = Math.PI / 2;
   arm.position.set(0, -0.02, 0.4);
   h.add(arm);
+  h.userData.fingers = fingers;
+  h.userData.thumb = thumb;
   h.traverse((o) => {
     if (o instanceof THREE.Mesh) {
       o.castShadow = false;
@@ -53,6 +57,13 @@ function buildHand(side: -1 | 1): THREE.Group {
     }
   });
   return h;
+}
+
+/** Close the hand: 0 open, 1 a fist (fingers fold toward the palm pads). */
+function curl(h: THREE.Group, k: number): void {
+  (h.userData.fingers as THREE.Group[]).forEach((f, i) => (f.rotation.x = k * (1.25 + i * 0.06)));
+  const t = h.userData.thumb as THREE.Mesh;
+  t.rotation.y = k * -0.5 * Math.sign(t.position.x);
 }
 
 const HOLD: Partial<Record<ItemKind, { pos: [number, number, number]; rot: [number, number, number]; scale: number }>> = {
@@ -223,6 +234,8 @@ export class Viewmodel {
       R.position.set(hx + spread, hy + 0.02 + wobble, hz + 0.1 + charge * 0.15);
       L.rotation.set(0.3, 0.5, 0.9);
       R.rotation.set(0.3, -0.5, -0.9);
+      curl(L, 0.55);
+      curl(R, 0.55);
       L.visible = R.visible = true;
       this.tool.visible = false;
     } else {
@@ -232,21 +245,29 @@ export class Viewmodel {
       L.position.set(-0.36 + reach * 0.12, -0.62 + act * 0.3, -0.42 - reach * 0.22);
       L.rotation.set(0.5 - reach * 0.4, 0.22, -0.16);
       L.visible = act > 0.02 || pumping;
+      curl(L, pumping ? 0.9 : 0.25 - reach * 0.25);
       if (tool) {
         R.visible = true;
         const ratchet = onBolt ? Math.sin(this.t * (f!.verb === 'torque' ? 14 : 22)) * 0.35 : 0;
         const up = (1 - this.raise) * -0.3;
         const sw = Math.sin(this.swing * Math.PI);
-        this.tool.position.set(0.24 - (onBolt ? 0.08 : 0) - sw * 0.2, -0.3 + up + (onBolt ? 0.06 : 0), -0.52 - (onBolt ? 0.12 : 0) - sw * 0.15);
-        this.tool.rotation.set(0.3 + ratchet * 0.3 + sw * 1.2, -0.35 + (tool === 'wrench' ? -Math.PI / 2 : 0) + ratchet, 0.2 - sw * 0.6);
-        R.position.set(this.tool.position.x + 0.06, this.tool.position.y - 0.06, this.tool.position.z + 0.12);
-        R.rotation.set(0.35 + ratchet * 0.3, -0.3, 0.1);
+        // carried like a tool, not a baton: up in the lower right, head
+        // angled forward and inboard so its silhouette reads
+        this.tool.position.set(0.23 - (onBolt ? 0.08 : 0) - sw * 0.2, -0.22 + up + (onBolt ? 0.04 : 0), -0.5 - (onBolt ? 0.12 : 0) - sw * 0.15);
+        this.tool.rotation.set(0.6 + ratchet * 0.3 + sw * 1.2, (tool === 'wrench' ? -Math.PI / 2 - 0.75 : -0.3) + ratchet, (tool === 'wrench' ? -0.35 : 0.1) - sw * 0.6);
+        // a fist round the grip, knuckles to the camera, not a flat glove
+        // the fist sits on the tool's grip (wrench: the orange sleeve)
+        const [gx, gy, gz] = tool === 'wrench' ? [-0.083, -0.087, 0.049] : [-0.021, -0.038, 0.055];
+        R.position.set(this.tool.position.x + gx + 0.035, this.tool.position.y + gy - 0.03, this.tool.position.z + gz + 0.07);
+        R.rotation.set(0.25 + ratchet * 0.3, -0.3, 1.3);
+        curl(R, 1);
       } else {
         const act = Math.max(reach, pumping ? 1 : 0);
         R.visible = act > 0.02;
         const pump = pumping ? Math.abs(Math.sin(this.t * 7)) * 0.08 : 0;
         R.position.set(0.36 - reach * 0.1 - (pumping ? 0.12 : 0), -0.62 + act * 0.3 - pump, -0.42 - reach * 0.2 - (pumping ? 0.15 : 0));
         R.rotation.set(0.5 - reach * 0.4, -0.22, 0.16);
+        curl(R, pumping ? 0.9 : 0.25 - reach * 0.25);
         if (pumping) L.position.set(-0.24, -0.44 - pump, -0.57);
       }
     }

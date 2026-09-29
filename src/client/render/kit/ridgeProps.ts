@@ -5,6 +5,7 @@ import { MAT, carPaint, styl } from '../stylized';
 import { cone, cyl, lathe, mesh, rbox, sph, textTexture, tube } from '../shapes';
 import { wheelModel } from '../itemModels';
 import { woodSign } from './building';
+import { fbm } from '../../../sim/terrain';
 import type { PropBuild } from './registry';
 
 // Dressing for Kestrel Ridge: the ranger cabin's insides, the sawmill yard,
@@ -27,7 +28,6 @@ const WOOD = () => MAT.wood(0x8a6040);
 const DARKWOOD = () => MAT.wood(0x5a3d26);
 const TIMBER = () => MAT.wood(0x9a7a52);
 const ROCK = () => styl({ color: 0x8f877c, rough: 0.95, noise: 0.35, noiseScale: 1.2, rim: 0.2 });
-const MOSS = () => styl({ color: 0x5f7f3c, rough: 1, noise: 0.3 });
 
 // --- overlook ------------------------------------------------------------------------------
 
@@ -449,40 +449,123 @@ function minePortal(): PropBuild {
   const sign = woodSign('HALVORSEN No. 2', 2.6, 0.5);
   sign.position.set(0, 4.05, 0.1);
   g.add(sign);
-  const rock = ROCK();
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 13) * Math.PI;
-    const r = 3.2 + ((i * 7) % 4) * 0.35;
-    const b = mesh(sph(1.2 + ((i * 11) % 5) * 0.25, 7, 5), rock, Math.cos(a) * r, Math.sin(a) * r * 1.1, -0.9 - ((i * 3) % 4) * 0.2);
-    b.scale.set(1, 0.8, 1);
+  // broken, faceted rock framing the portal (half-buried in the hill face)
+  const rock = styl({ color: 0x8f877c, rough: 0.95, noise: 0.3, noiseScale: 1.2, rim: 0.2, flat: true, spec: 0.4 });
+  for (let i = 0; i < 11; i++) {
+    const a = 0.12 + (i / 10) * (Math.PI - 0.24);
+    const size = 0.7 + ((i * 11) % 5) * 0.14;
+    // clear of the posts (±2.0) and header (3.7): the opening stays open
+    const r = 3.3 + size * 0.9 + ((i * 7) % 3) * 0.2;
+    const b = mesh(new THREE.DodecahedronGeometry(size, 0), rock, Math.cos(a) * r, Math.max(size * 0.5, Math.sin(a) * r * 1.05), -0.35 - ((i * 3) % 4) * 0.12);
+    b.scale.set(1.2, 0.75, 0.9);
+    b.rotation.set(i * 1.3, i * 2.1, i * 0.7);
     g.add(b);
   }
-  const moss = mesh(sph(2.6, 8, 6), MOSS(), 0, 5.4, -2.2);
-  moss.scale.set(1.6, 0.5, 1.2);
-  g.add(moss);
   // rails out of the portal
   for (const sx of [-0.45, 0.45]) g.add(mesh(rbox(0.06, 0.06, 6, 0.01), MAT.darkMetal(), sx, 0.05, 2.4));
   for (let z = -0.2; z < 5.4; z += 0.6) g.add(mesh(rbox(1.3, 0.08, 0.16, 0.01), t, 0, 0.03, z));
   return { obj: shadows(g) };
 }
 
-function mineTunnel(p: PropDef): PropBuild {
+/**
+ * The hill the drift is driven into, draped over the real terrain: an
+ * ellipsoidal rise (steep, rocky face at the portal; grassy crown) with a
+ * doorway-shaped cut over the drift so the path in stays open. The prop must
+ * sit unrotated (the tunnel runs toward -X).
+ */
+function mineHill(p: PropDef, w: World, len: number): THREE.Mesh {
+  const o = p.pos;
+  const cx = -len / 2 - 2;
+  const front = -0.35;
+  const rx = len / 2 + 9;
+  const rz = 15;
+  const H = 8;
+  const x0 = cx - rx - 1;
+  const x1 = front + 1.5;
+  const nx = Math.ceil((x1 - x0) / 0.5);
+  const nz = Math.ceil((2 * rz + 2) / 0.5);
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (let i = 0; i <= nx; i++) {
+    for (let j = 0; j <= nz; j++) {
+      const x = x0 + ((x1 - x0) * i) / nx;
+      const z = -rz - 1 + ((2 * rz + 2) * j) / nz;
+      const n1 = fbm((o.x + x) / 5, (o.z + z) / 5, 77, 3);
+      // A broad rise that eases into the meadow (cosine bell)...
+      const dx = Math.min(x - cx, 0) / rx;
+      const r = Math.min(1, Math.hypot(dx, z / (rz * (1 + n1 * 0.08))));
+      let bump = H * 0.5 * (1 + Math.cos(Math.PI * r)) * (1 + n1 * 0.15);
+      // ...cut off at the front by a rock face that curves back at the sides.
+      const face = front - (z / rz) ** 2 * 7 + n1 * 0.9 * Math.min(1, Math.abs(z) / 3);
+      bump *= Math.pow(THREE.MathUtils.clamp((face - x) / 2.6, 0, 1), 0.45);
+      if (bump > 0.4) bump += fbm((o.x + x) / 1.6, (o.z + z) / 1.6, 91, 2) * 0.45;
+      // the cut over the drift: a flat lintel of rock above the timber sets
+      if (Math.abs(z) < 2.35 && x > -len - 0.4 && x < front - 0.5) bump = Math.max(bump, 3.85);
+      const ground = w.terrain.heightAt(o.x + x, o.z + z) - o.y;
+      const sink = 0.3 * (1 - THREE.MathUtils.smoothstep(bump, 0, 0.6));
+      pos.push(x, ground + bump - sink, z);
+    }
+  }
+  const row = nz + 1;
+  for (let i = 0; i < nx; i++)
+    for (let j = 0; j < nz; j++) {
+      // the doorway itself: no surface (else the step up to the lintel walls it off)
+      const xc = x0 + ((x1 - x0) * (i + 0.5)) / nx;
+      const zc = -rz - 1 + ((2 * rz + 2) * (j + 0.5)) / nz;
+      if (Math.abs(zc) < 2.05 && xc > front - 0.8 && xc < x1) continue;
+      const a = i * row + j;
+      idx.push(a, a + 1, a + row, a + 1, a + row + 1, a + row);
+    }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  // Paint: grassy crown, stratified rock on the steep faces.
+  const nrm = geo.getAttribute('normal');
+  const col = new Float32Array(pos.length);
+  const moss = new THREE.Color(0x5b8a3a);
+  const moss2 = new THREE.Color(0x86a84a);
+  const stone = new THREE.Color(0x8c8378);
+  const stoneDark = new THREE.Color(0x5e5852);
+  const c = new THREE.Color();
+  for (let v = 0; v < pos.length / 3; v++) {
+    const x = pos[v * 3];
+    const y = pos[v * 3 + 1];
+    const z = pos[v * 3 + 2];
+    const n = fbm((o.x + x) / 3, (o.z + z) / 3, 13, 2) * 0.5 + 0.5;
+    const strata = 0.5 + 0.5 * Math.sin(y * 2.6 + n * 2.2);
+    c.copy(stone).lerp(stoneDark, strata * 0.55 + n * 0.2);
+    const grassK = THREE.MathUtils.smoothstep(nrm.getY(v) + (n - 0.5) * 0.2, 0.42, 0.62);
+    c.lerp(new THREE.Color().copy(moss).lerp(moss2, n), grassK);
+    col[v * 3] = c.r;
+    col[v * 3 + 1] = c.g;
+    col[v * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const m = mesh(geo, styl({ vertexColors: true, rough: 0.95, noise: 0.22, noiseScale: 1.4, rim: 0.12, spec: 0.4, side: THREE.DoubleSide, backShade: 0.18 }));
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+function mineTunnel(p: PropDef, w: World): PropBuild {
   // Interior dressing for the timbered drift: sets every 2 m, rock lining.
   const g = new THREE.Group();
   const len = num(p, 'len', 14);
   const t = DARKWOOD();
-  const rock = styl({ color: 0x5f5850, rough: 1, noise: 0.35, noiseScale: 1.5, side: THREE.BackSide });
-  const lining = mesh(rbox(len, 3.2, 3.6, 0.3), rock, -len / 2, 1.5, 0);
+  // The lining darkens with depth: daylight dies a few metres in.
+  const rock = styl({ vertexColors: true, color: 0x5f5850, rough: 1, noise: 0.35, noiseScale: 1.5, side: THREE.BackSide, spec: 0.3 });
+  const lg = rbox(len, 3.2, 3.6, 0.3).clone();
+  const lp = lg.getAttribute('position');
+  const shade = new Float32Array(lp.count * 3);
+  for (let i = 0; i < lp.count; i++) {
+    const k = 0.16 + 0.84 * THREE.MathUtils.smoothstep(lp.getX(i), len / 2 - 6, len / 2);
+    shade.fill(k, i * 3, i * 3 + 3);
+  }
+  lg.setAttribute('color', new THREE.BufferAttribute(shade, 3));
+  const lining = mesh(lg, rock, -len / 2, 1.5, 0);
   g.add(lining);
-  // Outside, the drift is buried under a mossy rock mound that runs into the
-  // hillside behind it (you're inside the mound, so its faces cull away).
-  const mound = mesh(sph(1, 14, 10), ROCK(), -len / 2 - 1, 0.2, 0);
-  mound.scale.set(len / 2 + 2.5, 5.2, 5.5);
-  mound.castShadow = true;
-  g.add(mound);
-  const cap = mesh(sph(1, 12, 8), MOSS(), -len / 2 - 1.5, 3.4, 0);
-  cap.scale.set(len / 2 + 1, 2.4, 4.2);
-  g.add(cap);
+  g.add(mineHill(p, w, len));
   for (let x = -1; x > -len; x -= 2) {
     for (const sz of [-1, 1]) g.add(mesh(rbox(0.25, 3.0, 0.25, 0.04), t, x, 1.5, sz * 1.55));
     g.add(mesh(rbox(0.3, 0.3, 3.4, 0.04), t, x, 3.0, 0));

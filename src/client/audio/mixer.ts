@@ -71,6 +71,7 @@ class EngineSynth {
   private noiseGain: GainNode;
   private filter: BiquadFilterNode;
   private shaper: WaveShaperNode;
+  private dist: GainNode;
   rpm = 0.12;
   private gear = 1;
   private target = 0;
@@ -82,10 +83,12 @@ class EngineSynth {
     this.ctx = ctx;
     this.out = ctx.createGain();
     this.out.gain.value = 0;
+    this.dist = ctx.createGain();
+    this.dist.gain.value = 1;
     this.filter = ctx.createBiquadFilter();
     this.filter.type = 'lowpass';
     this.filter.frequency.value = 600;
-    this.filter.Q.value = 2.2;
+    this.filter.Q.value = 0.5;
     this.shaper = ctx.createWaveShaper();
     const curve = new Float32Array(1024);
     for (let i = 0; i < 1024; i++) {
@@ -113,7 +116,7 @@ class EngineSynth {
     this.noiseGain = ctx.createGain();
     this.noiseGain.gain.value = 0.25;
     this.noise.connect(nf).connect(this.noiseGain).connect(this.filter);
-    this.shaper.connect(this.filter).connect(this.out).connect(dest);
+    this.shaper.connect(this.filter).connect(this.out).connect(this.dist).connect(dest);
     this.saw.start();
     this.sub.start();
     this.noise.start();
@@ -149,14 +152,32 @@ class EngineSynth {
     return { shift, pop };
   }
 
+  dispose(): void {
+    try {
+      this.saw.stop();
+      this.sub.stop();
+      this.noise.stop();
+    } catch {
+      /* already stopped */
+    }
+    this.dist.disconnect();
+  }
+
+  /** Distance attenuation, kept separate from the engine's own level. */
+  distance(g: number, t: number): void {
+    if (Number.isFinite(g)) this.dist.gain.setTargetAtTime(g, t, 0.1);
+  }
+
   private set(rpm: number, load: number, vol: number): void {
     const t = this.ctx.currentTime;
-    const f = 26 + rpm * 120;
+    const r = Number.isFinite(rpm) ? Math.min(1.05, Math.max(0, rpm)) : 0.12;
+    const f = 26 + r * 120;
     this.saw.frequency.setTargetAtTime(f, t, 0.03);
     this.sub.frequency.setTargetAtTime(f * 0.5, t, 0.03);
-    this.filter.frequency.setTargetAtTime(380 + rpm * 1900 * (0.5 + load * 0.5), t, 0.05);
-    this.noiseGain.gain.setTargetAtTime(0.15 + load * 0.3, t, 0.05);
-    this.out.gain.setTargetAtTime(vol * 0.32, t, 0.08);
+    // a low, throaty ceiling: high revs growl rather than whine
+    this.filter.frequency.setTargetAtTime(320 + r * 1100 * (0.5 + load * 0.5), t, 0.05);
+    this.noiseGain.gain.setTargetAtTime(0.15 + load * 0.25, t, 0.05);
+    this.out.gain.setTargetAtTime(vol * 0.34, t, 0.08);
   }
 }
 
@@ -184,18 +205,51 @@ export class Mixer implements Audio {
   private lastPlay = new Map<string, number>();
   private settings: Settings;
   private mood: 'calm' | 'work' | 'tension' = 'calm';
+  private analyser: AnalyserNode;
 
   constructor(settings: Settings) {
     this.settings = settings;
     this.ctx = new AudioContext();
+    // master → gentle glue compressor → soft clip → brick-wall-ish limiter.
+    // Nothing downstream of master can ever exceed full scale.
     const comp = this.ctx.createDynamicsCompressor();
-    comp.threshold.value = -14;
+    comp.threshold.value = -16;
+    comp.knee.value = 12;
     comp.ratio.value = 3;
+    comp.attack.value = 0.01;
+    comp.release.value = 0.25;
+    const clip = this.ctx.createWaveShaper();
+    const curve = new Float32Array(2048);
+    for (let i = 0; i < curve.length; i++) {
+      const x = (i / (curve.length - 1)) * 2 - 1;
+      curve[i] = Math.tanh(x * 1.2) / Math.tanh(1.2);
+    }
+    clip.curve = curve;
+    clip.oversample = '2x';
+    const limit = this.ctx.createDynamicsCompressor();
+    limit.threshold.value = -3;
+    limit.knee.value = 0;
+    limit.ratio.value = 20;
+    limit.attack.value = 0.002;
+    limit.release.value = 0.08;
+    this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 2048;
     this.master = this.ctx.createGain();
-    this.master.connect(comp).connect(this.ctx.destination);
+    this.master.connect(comp).connect(clip).connect(limit).connect(this.ctx.destination);
+    limit.connect(this.analyser);
     this.sfx = this.bus();
     this.music = this.bus();
-    this.voiceBus = this.bus();
+    this.voiceBus = this.ctx.createGain();
+    // the radio: band-limited like a real handset, never shrill
+    const radioLo = this.ctx.createBiquadFilter();
+    radioLo.type = 'lowpass';
+    radioLo.frequency.value = 2400;
+    radioLo.Q.value = -3;
+    const radioHi = this.ctx.createBiquadFilter();
+    radioHi.type = 'highpass';
+    radioHi.frequency.value = 220;
+    radioHi.Q.value = -3;
+    this.voiceBus.connect(radioHi).connect(radioLo).connect(this.master);
     this.amb = this.bus();
     this.noiseBuf = this.ctx.createBuffer(1, this.ctx.sampleRate * 2, this.ctx.sampleRate);
     const d = this.noiseBuf.getChannelData(0);
@@ -249,7 +303,7 @@ export class Mixer implements Audio {
   }
 
   stopAll(): void {
-    for (const e of this.engines.values()) e.out.gain.value = 0;
+    for (const e of this.engines.values()) e.dispose();
     this.engines.clear();
     if (this.pour) this.pour.g.gain.value = 0;
     if (this.rumble) this.rumble.g.gain.value = 0;
@@ -494,7 +548,7 @@ export class Mixer implements Audio {
         this.sample('punch', pos, 0.9);
         break;
       case 'growl':
-        this.synth({ type: 'sawtooth', f: 90, f2: 70, dur: 0.9, vol: 0.18 * vol, pos, filter: { type: 'lowpass', f: 500, q: 6 }, attack: 0.1 });
+        this.synth({ type: 'sawtooth', f: 90, f2: 70, dur: 0.9, vol: 0.18 * vol, pos, filter: { type: 'lowpass', f: 500, q: 2 }, attack: 0.1 });
         this.synth({ type: 'noise', f: 300, dur: 0.9, vol: 0.1 * vol, pos, filter: { type: 'bandpass', f: 250, q: 3 }, attack: 0.1 });
         break;
       case 'bite':
@@ -616,7 +670,7 @@ export class Mixer implements Audio {
     for (let i = 0; i < syll; i++) {
       const len = 0.07 + Math.random() * 0.08;
       const f = base * (0.85 + Math.random() * 0.4) * (i % 7 === 6 ? 1.25 : 1);
-      this.synth({ type: 'sawtooth', f, f2: f * (0.9 + Math.random() * 0.2), dur: len, vol: 0.055, delay: t, attack: 0.012, filter: { type: 'bandpass', f: 700 + Math.random() * 900, q: 3.5 }, bus });
+      this.synth({ type: 'sawtooth', f, f2: f * (0.9 + Math.random() * 0.2), dur: len, vol: 0.04, delay: t, attack: 0.015, filter: { type: "bandpass", f: 650 + Math.random() * 600, q: 2 }, bus });
       t += len + (Math.random() < 0.18 ? 0.12 : 0.02);
     }
     this.synth({ type: 'noise', f: 4000, dur: 0.08, vol: 0.1, delay: t + 0.05, filter: { type: 'bandpass', f: 2600, q: 1 }, bus });
@@ -662,7 +716,7 @@ export class Mixer implements Audio {
       if (r.shift) this.synth({ type: 'noise', f: 600, dur: 0.12, vol: 0.12, filter: { type: 'lowpass', f: 500 } });
       if (r.pop) this.synth({ type: 'noise', f: 800, dur: 0.07, vol: 0.35, delay: 0.05, filter: { type: 'lowpass', f: 900 } });
       const d = this.listener.pos.distanceTo(new THREE.Vector3(v.pos.x, v.pos.y, v.pos.z));
-      e.out.gain.value *= 1 / (1 + Math.max(0, d - 4) * 0.1);
+      e.distance(1 / (1 + Math.max(0, d - 4) * 0.1), t);
     }
     // tyres on the ground
     const pv = w.player.vehicle ? w.vehicles.get(w.player.vehicle) : undefined;
@@ -748,38 +802,98 @@ export class Mixer implements Audio {
     const rest = (Math.floor(this.musicStep / 32) % 3 === 2 && beat > 1) || Math.random() < 0.18;
     if (rest) return;
     const chord = chords[bar];
+    if (beat === 0) this.pad(chord.map((n) => n - 12), (60 / bpm) * 4 * 1.05, this.mood === 'tension' ? 0.035 : 0.028);
     const pattern = [0, 1, 2, 1, 0, 2, 1, 2];
     const note = chord[pattern[beat]] + (beat === 0 ? -12 : 0);
     this.pluck(440 * Math.pow(2, (note - 69) / 12), beat === 0 ? 0.16 : 0.09);
   }
 
-  /** Karplus-Strong-ish pluck using a short noise burst into a tuned feedback delay. */
+  /**
+   * A plucked-string note built only from oscillators and envelopes — no
+   * feedback anywhere, so it can never run away. A triangle body, a quickly
+   * fading octave sine for the pick "ping", a filter that closes as the note
+   * dies, and a tiny noise tick for the attack.
+   */
   private pluck(freq: number, vol: number): void {
     const ctx = this.ctx;
-    const t0 = ctx.currentTime;
-    const delay = ctx.createDelay(0.05);
-    delay.delayTime.value = 1 / freq;
-    const fb = ctx.createGain();
-    fb.gain.value = 0.975;
+    const t0 = ctx.currentTime + 0.01;
+    const dur = 1.7;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t0);
+    out.gain.exponentialRampToValueAtTime(vol, t0 + 0.006);
+    out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 2600;
-    const out = ctx.createGain();
-    out.gain.setValueAtTime(vol, t0);
-    out.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.4);
-    const src = ctx.createBufferSource();
-    src.buffer = this.noiseBuf;
-    const burst = ctx.createGain();
-    burst.gain.setValueAtTime(1, t0);
-    burst.gain.exponentialRampToValueAtTime(0.0001, t0 + 1 / freq * 2.5);
-    src.connect(burst).connect(delay);
-    delay.connect(lp).connect(fb).connect(delay);
+    lp.Q.value = -3; // (dB) no resonant peak
+    lp.frequency.setValueAtTime(Math.min(4200, freq * 8), t0);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(300, freq * 1.6), t0 + dur * 0.8);
+    const body = ctx.createOscillator();
+    body.type = 'triangle';
+    body.frequency.setValueAtTime(freq * 1.004, t0);
+    body.frequency.exponentialRampToValueAtTime(freq, t0 + 0.05);
+    const ping = ctx.createOscillator();
+    ping.type = 'sine';
+    ping.frequency.value = freq * 2;
+    const pingG = ctx.createGain();
+    pingG.gain.setValueAtTime(0.35, t0);
+    pingG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+    body.connect(lp);
+    ping.connect(pingG).connect(lp);
     lp.connect(out).connect(this.music);
-    src.start(t0, Math.random());
-    src.stop(t0 + 0.05);
-    setTimeout(() => {
-      out.disconnect();
-      fb.disconnect();
-    }, 2600);
+    body.start(t0);
+    ping.start(t0);
+    body.stop(t0 + dur + 0.05);
+    ping.stop(t0 + dur + 0.05);
+    body.onended = () => out.disconnect();
+    this.synth({ type: 'noise', f: 2500, dur: 0.03, vol: vol * 0.35, filter: { type: 'bandpass', f: freq * 4, q: 1 }, bus: this.music });
+  }
+
+  /** A soft sustained chord under the plucks: detuned sine pairs, slow swell. */
+  private pad(notes: number[], dur: number, vol: number): void {
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime + 0.02;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t0);
+    out.gain.exponentialRampToValueAtTime(vol, t0 + Math.min(1.4, dur * 0.4));
+    out.gain.setValueAtTime(vol, t0 + dur * 0.7);
+    out.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.Q.value = -3;
+    lp.frequency.value = 1100;
+    lp.connect(out).connect(this.music);
+    const oscs: OscillatorNode[] = [];
+    for (const n of notes) {
+      const f = 440 * Math.pow(2, (n - 69) / 12);
+      for (const cents of [-5, 5]) {
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.value = f * Math.pow(2, cents / 1200);
+        o.connect(lp);
+        o.start(t0);
+        o.stop(t0 + dur + 0.05);
+        oscs.push(o);
+      }
+    }
+    oscs[0].onended = () => out.disconnect();
+  }
+
+  /** Master level for the dev bridge / tests: RMS, peak and whether anything went NaN. */
+  meter(): { rms: number; peak: number; nan: boolean; state: string } {
+    const a = this.analyser;
+    const buf = new Float32Array(a.fftSize);
+    a.getFloatTimeDomainData(buf);
+    let sum = 0;
+    let peak = 0;
+    let nan = false;
+    for (const v of buf) {
+      if (!Number.isFinite(v)) {
+        nan = true;
+        continue;
+      }
+      sum += v * v;
+      peak = Math.max(peak, Math.abs(v));
+    }
+    return { rms: Math.sqrt(sum / buf.length), peak, nan, state: this.ctx.state };
   }
 }

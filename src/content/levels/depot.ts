@@ -47,7 +47,8 @@ const TRIM = 0x3d5a73;
 
 export const DEPOT = {
   clock: { x: -6.22, y: 1.35, z: -5.4 },
-  locker: { x: -9.4, y: 1.2, z: -8.3 },
+  // the ROOKIE door (third of four lockers centred on x=-10.2), its front face
+  locker: { x: -9.9, y: 1.05, z: -8.33 },
   board: { x: 0, y: 1.9, z: -8.8 },
   bin: { x: 10, y: 0, z: 5.6 },
   gates: [
@@ -60,6 +61,9 @@ export const DEPOT = {
   bay: { x: 14.5, z: 26, yaw: 0 },
   crate: { x: 9, y: 2.6, z: -20 },
 };
+
+// Crew room partitions: a tired institutional sage.
+const CREW_WALL = 0xa7c2ae;
 
 export function makeDepot(): LevelDef {
   const t = Terrain.for(TERRAIN);
@@ -83,8 +87,8 @@ export function makeDepot(): LevelDef {
   k.prop('sign', { x: 0, y: 7.3, z: 9.25 }, Math.PI, { text: 'THE COMPANY · BAY 3', w: 7, h: 1.1 });
 
   // Locker room (NW) and storeroom (NE): partial-height rooms with ceilings.
-  k.wall({ x: -12, z: -4 }, { x: -6, z: -4 }, 0, 3, 0.2, [{ s: 2.3, e: 3.5, y0: 0, y1: 2.2 }], 'plaster', 0xe7dfcd);
-  k.wall({ x: -6, z: -9 }, { x: -6, z: -4 }, 0, 3, 0.2, [], 'plaster', 0xe7dfcd);
+  k.wall({ x: -12, z: -4 }, { x: -6, z: -4 }, 0, 3, 0.2, [{ s: 2.3, e: 3.5, y0: 0, y1: 2.2 }], 'plaster', CREW_WALL);
+  k.wall({ x: -6, z: -9 }, { x: -6, z: -4 }, 0, 3, 0.2, [], 'plaster', CREW_WALL);
   k.prop('slab', { x: -9, y: 3.0, z: -6.5 }, 0, { w: 6.2, d: 5.2, mat: 'ceiling', thick: 0.12 });
   k.wall({ x: 6, z: -4 }, { x: 12, z: -4 }, 0, 3, 0.2, [{ s: 2.5, e: 3.9, y0: 0, y1: 2.2 }], 'plaster', 0xd6cdb9);
   k.wall({ x: 6, z: -9 }, { x: 6, z: -4 }, 0, 3, 0.2, [], 'plaster', 0xd6cdb9);
@@ -100,7 +104,12 @@ export function makeDepot(): LevelDef {
   k.prop('clock', DEPOT.clock, -Math.PI / 2);
   k.prop('poster', { x: -11.83, y: 1.7, z: -5.6 }, Math.PI / 2, { art: 'safety' });
   k.prop('poster', { x: -6.13, y: 1.75, z: -7.4 }, -Math.PI / 2, { art: 'hands' });
-  k.prop('lamp', { x: -9, y: 2.92, z: -6.5 }, 0, { color: 0xffe2b8, power: 2.6, range: 8 });
+  k.prop('lamp', { x: -9, y: 2.92, z: -6.5 }, 0, { color: 0xffd9a8, power: 3.4, range: 9 });
+  // the break corner: somebody's lunch, somebody's newspaper
+  k.prop('rug', { x: -7.55, y: 0.02, z: -6.95 }, 0, { w: 1.9, d: 1.5 });
+  furnish(k, 'crewTable', -7.55, 0, -6.95, 0);
+  furnish(k, 'fridge', -11.5, 0, -7.45, Math.PI / 2);
+  k.prop('corkboard', { x: -10.9, y: 1.65, z: -4.12 }, Math.PI);
 
   // --- storeroom (dark: the flashlight lesson) ----------------------------------------------------
   furnish(k, 'tireRack', 11.4, 0, -6.4, -Math.PI / 2);
@@ -216,8 +225,8 @@ export function makeDepot(): LevelDef {
 
   // --- items ---------------------------------------------------------------------------------------
   const items: ItemSpawn[] = [
-    { kind: 'wrench', pos: { x: -9.45, y: 1.12, z: -8.55 }, hiddenUntil: 'locker', pinned: true },
-    { kind: 'flashlight', pos: { x: -9.2, y: 1.12, z: -8.5 }, yaw: 1.2, hiddenUntil: 'locker', pinned: true },
+    { kind: 'wrench', pos: { x: -10.0, y: 1.1, z: -8.55 }, hiddenUntil: 'locker', pinned: true },
+    { kind: 'flashlight', pos: { x: -9.78, y: 1.12, z: -8.52 }, yaw: 1.2, hiddenUntil: 'locker', pinned: true },
     { kind: 'jack', pos: { x: -10.2, y: 0.1, z: 5.4 }, yaw: 0.4, pinned: true },
     { kind: 'wheel', pos: { x: 10.4, y: 0.131, z: -7.7 }, variant: 'truck', pinned: true },
     { kind: 'wheel', pos: { x: 10.4, y: 0.393, z: -7.7 }, variant: 'truck', pinned: true },
@@ -230,9 +239,9 @@ export function makeDepot(): LevelDef {
   const cones: Vec3[] = [];
   for (const g of DEPOT.gates) for (const dx of [-1.9, 1.9]) cones.push({ x: g.x + dx, y: 0.3, z: g.z });
   for (let z = 20; z <= 48; z += 4) for (const x of [-7, 7]) cones.push({ x, y: 0.3, z });
-  for (const c of cones) items.push({ kind: 'cone', pos: c, pinned: true });
+  for (const c of cones) items.push({ kind: 'cone', pos: c, sleep: true });
   // the sealed crate on the far container
-  items.push({ kind: 'crate', pos: { x: DEPOT.crate.x, y: DEPOT.crate.y + 0.21, z: DEPOT.crate.z }, yaw: 0.3, pinned: true });
+  items.push({ kind: 'crate', pos: { x: DEPOT.crate.x, y: DEPOT.crate.y + 0.21, z: DEPOT.crate.z }, yaw: 0.3, sleep: true });
   const coneStart = cones.map((c) => ({ ...c }));
 
   // --- the job -------------------------------------------------------------------------------------
@@ -382,7 +391,8 @@ export function makeDepot(): LevelDef {
       {
         id: 'clock',
         pos: DEPOT.clock,
-        r: 0.28,
+        r: 0.3,
+        box: { hx: 0.2, hy: 0.27, hz: 0.12, yaw: -Math.PI / 2 },
         label: (w) => (w.flag('clockedIn') ? 'Clocked in 09:24' : 'Punch in'),
         verb: 'tap',
         priority: 1,
@@ -396,11 +406,12 @@ export function makeDepot(): LevelDef {
       {
         id: 'locker',
         pos: DEPOT.locker,
-        r: 0.45,
+        r: 0.5,
+        box: { hx: 0.29, hy: 0.95, hz: 0.06 },
         label: 'Open your locker',
         verb: 'tap',
         priority: 1,
-        when: (w) => (w.flag('locker') ? false : w.flag('clockedIn') ? true : 'Punch in first'),
+        when: (w) => (w.flag('locker') ? false : true),
         run: (w) => {
           w.setFlag('locker');
           w.sfx('locker', DEPOT.locker);
@@ -410,6 +421,7 @@ export function makeDepot(): LevelDef {
         id: 'board',
         pos: DEPOT.board,
         r: 0.7,
+        box: { hx: 1.35, hy: 0.7, hz: 0.08 },
         label: 'Read the job board',
         verb: 'tap',
         priority: -1,

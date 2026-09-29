@@ -5,7 +5,7 @@ import type { World } from '../../sim/world';
 import { readings, SAFE_TARGET } from '../../sim/puzzles/valveBalance';
 import { itemModel, wheelModel } from './itemModels';
 import { MAT, styl } from './stylized';
-import { cyl, lathe, mesh, rbox, torus, tube } from './shapes';
+import { cyl, lathe, mesh, rbox, textTexture, torus, tube } from './shapes';
 import type { VehicleModel } from './vehicles/parts';
 
 // Draws a Machine's live state. Parts come and go from slots, nuts spin in and
@@ -41,6 +41,7 @@ export class MachineView {
   private jacks = new Map<string, { def: JackDef; obj: THREE.Group; arm: THREE.Object3D; lift: number }>();
   private clamps = new Map<string, { def: TerminalsDef; pos: THREE.Group; neg: THREE.Group; pT: number; nT: number }>();
   private panels = new Map<string, PanelVis>();
+  private tmpPanel = new THREE.Vector3();
   private caps = new Map<string, { def: FluidDef; cap: THREE.Mesh }>();
   private hoodT = 0;
   private prevPos = new THREE.Vector3();
@@ -343,7 +344,13 @@ export class MachineView {
       c.cap.visible = !pouring;
     }
 
-    for (const p of this.panels.values()) p.sync(dt, time, !!(p.def.needs ?? []).every((n) => m.needMet(n, w.ctx)));
+    // Panel covers stay shut until you're at them (or working them).
+    const eye = w.player.eye();
+    for (const p of this.panels.values()) {
+      const at = p.group.getWorldPosition(this.tmpPanel);
+      const near = w.player.mode === 'foot' && Math.hypot(at.x - eye.x, at.y - eye.y, at.z - eye.z) < 2.4;
+      p.sync(dt, time, near && !!(p.def.needs ?? []).every((n) => m.needMet(n, w.ctx)));
+    }
   }
 
   private groundY(): number {
@@ -471,6 +478,19 @@ export class PanelVis {
     const lid = mesh(rbox(0.34, 0.3, 0.02, 0.015), styl({ color: 0x3a3d45, rough: 0.5 }));
     lid.position.y = -0.15;
     this.lidPivot.add(lid);
+    // a proper cover: hinge barrel, a latch, and a label you can read
+    const hinge = mesh(cyl(0.012, 0.012, 0.3, 10), MAT.darkMetal());
+    hinge.rotation.z = Math.PI / 2;
+    this.lidPivot.add(hinge);
+    const latch = mesh(rbox(0.06, 0.025, 0.02, 0.006), MAT.chrome());
+    latch.position.set(0, -0.285, 0.015);
+    this.lidPivot.add(latch);
+    const label = mesh(
+      new THREE.PlaneGeometry(0.22, 0.07),
+      styl({ map: textTexture([{ text: def.puzzle === 'fuse' ? 'FUSES' : 'VALVES', size: 70, color: '#f3e9cf', y: 64 }], 256, 96, '#c0392b'), rough: 0.6, noise: 0 }),
+    );
+    label.position.set(0, -0.12, 0.0115);
+    this.lidPivot.add(label);
     g.add(this.lidPivot);
 
     if (def.puzzle === 'fuse') {

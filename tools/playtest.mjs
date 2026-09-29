@@ -96,6 +96,32 @@ try {
   await page.waitForFunction(() => window.__mech.game()?.level.id === 'depot' && !window.__mech.game().paused, { timeout: 180000 });
   if (!GRASS) await ev(page, () => (window.__mech.game().view.grass.group.visible = false));
   await shot(page, 'depot-start');
+
+  // Real input: press the actual E key (through Input, not the debug intent)
+  // on the time clock, the ROOKIE locker and both tools.
+  const pressAt = async (label, pos, from, check) => {
+    await ev(page, (a) => window.__mech.teleport(a.from[0], a.from[1]), { from });
+    await frames(page, 4);
+    await ev(page, (p) => window.__mech.lookAt(p[0], p[1], p[2]), pos);
+    await frames(page, 4);
+    const focus = await ev(page, () => window.__mech.focus());
+    await page.keyboard.down('KeyE');
+    await frames(page, 3);
+    await page.keyboard.up('KeyE');
+    await frames(page, 3);
+    const ok = await ev(page, check);
+    console.log(`  ${ok ? '✓' : '✗'} E on ${label} (focus: ${focus})`);
+    if (!ok) errors.push(`real input: E on ${label} did nothing (focus was ${focus})`);
+  };
+  await pressAt('time clock', [-6.22, 1.35, -5.4], [-8, -5.4], () => window.__mech.game().world.flag('clockedIn'));
+  await pressAt('ROOKIE locker', [-9.9, 1.3, -8.33], [-9.9, -6.8], () => window.__mech.game().world.flag('locker'));
+  await frames(page, 20);
+  await pressAt('wrench', [-10.0, 1.14, -8.55], [-9.95, -7.3], () => window.__mech.game().world.hasItem('wrench'));
+  await pressAt('flashlight', [-9.78, 1.14, -8.5], [-9.8, -7.3], () => window.__mech.game().world.hasItem('flashlight'));
+  await page.keyboard.press('KeyF');
+  await frames(page, 3);
+  if (!(await ev(page, () => window.__mech.game().world.player.flashlight))) errors.push('real input: F did not toggle the flashlight');
+  await shot(page, 'depot-locker-open');
   await ev(page, () => window.__mech.teleport(6, 7, 0.9, -0.12));
   await shot(page, 'depot-betsy');
   await ev(page, () => {

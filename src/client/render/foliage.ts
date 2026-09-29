@@ -100,10 +100,11 @@ function trunk(h: number, r: number, color = TRUNK): THREE.BufferGeometry {
 
 function pine(seed: number, fir = false): THREE.BufferGeometry {
   const rng = makeRng(seed);
-  const parts: THREE.BufferGeometry[] = [trunk(4.2, 0.26)];
+  const parts: THREE.BufferGeometry[] = [trunk(5.0, 0.26)];
   const tiers = fir ? 6 : 5;
   const H = fir ? 7.5 : 6.6;
-  const base = 1.3;
+  // lowest boughs clear head height, so you can walk under a pine
+  const base = fir ? 2.1 : 2.2;
   const center = new THREE.Vector3(0, base + H * 0.4, 0);
   const deep = col(fir ? 0x1f4a3a : 0x2a5a3a);
   const mid = col(fir ? 0x2f6a48 : 0x3f7d45);
@@ -113,15 +114,24 @@ function pine(seed: number, fir = false): THREE.BufferGeometry {
     const r = (fir ? 2.1 : 2.5) * (1 - k * 0.78) + 0.25;
     const h = (H / tiers) * 1.7;
     const y = base + (i / tiers) * H * 0.92;
-    const cone = new THREE.ConeGeometry(r, h, 10, 2, false);
+    // NB: not ConeGeometry — in three r169 a zero top radius drops half the
+    // triangles of every row below the tip, which punched holes in the boughs.
+    const cone = new THREE.CylinderGeometry(0.02, r, h, 16, 3, false);
     cone.translate((rng() - 0.5) * 0.15, y + h / 2, (rng() - 0.5) * 0.15);
-    // droop the skirt a touch, jagged
+    // droop the skirt into soft scallops, and tuck the underside up into a
+    // shallow dome so every tier is a closed, solid bough
     const pos = cone.getAttribute('position');
+    const ph = rng() * 6;
     for (let j = 0; j < pos.count; j++) {
       const py = pos.getY(j);
       if (py < y + 0.05) {
-        const a = Math.atan2(pos.getZ(j), pos.getX(j));
-        pos.setY(j, py - 0.25 - Math.abs(Math.sin(a * 5 + i)) * 0.3);
+        const px = pos.getX(j);
+        const pz = pos.getZ(j);
+        const a = Math.atan2(pz, px);
+        const rr = Math.hypot(px, pz) / r;
+        const scallop = 0.22 + (0.5 + 0.5 * Math.sin(a * 8 + ph)) * 0.14;
+        // rim droops; the cap centre lifts up inside the cone
+        pos.setY(j, py - scallop * rr + (1 - rr) * h * 0.35);
       }
     }
     let g = blob(cone, rng, 0.12, center, 0.55);
@@ -129,6 +139,8 @@ function pine(seed: number, fir = false): THREE.BufferGeometry {
       const up = THREE.MathUtils.clamp((p.y - y) / h, 0, 1);
       const out = Math.hypot(p.x, p.z) / r;
       o.copy(deep).lerp(mid, up * 0.8 + out * 0.3).lerp(tip, Math.max(0, n.y) * 0.35 * (0.5 + k));
+      // undersides sit in the tree's own shade
+      if (n.y < -0.2) o.multiplyScalar(0.72);
     });
     parts.push(g);
   }
@@ -267,6 +279,9 @@ const BUILDERS: Record<NatureKind, (seed: number) => THREE.BufferGeometry> = {
   deadTree: (s) => deadTree(s),
 };
 
+// Object-space height where the canopy starts: trunks below it never dither.
+const FADE_MIN_Y: Partial<Record<NatureKind, number>> = { pine: 1.9, fir: 1.8, broadleaf: 2.4, birch: 3.1 };
+
 const WIND: Partial<Record<NatureKind, number>> = { pine: 0.018, fir: 0.015, broadleaf: 0.03, birch: 0.04, bush: 0.05, deadTree: 0.01 };
 
 export class Nature {
@@ -287,7 +302,23 @@ export class Nature {
     const matFor = (k: NatureKind) => {
       let m = mats.get(k);
       if (!m) {
-        m = styl({ vertexColors: true, rough: 0.9, noise: 0.1, noiseScale: 2, rim: k === 'rock' || k === 'boulder' ? 0.15 : 0.45, wind: WIND[k] ?? 0 });
+        const stone = k === 'rock' || k === 'boulder';
+        const canopy = k === 'pine' || k === 'fir' || k === 'broadleaf' || k === 'birch' || k === 'bush';
+        // Canopies are double-sided (seen from under or inside, they're solid
+        // shade, not holes) and dither away as the camera pushes into them.
+        m = styl({
+          vertexColors: true,
+          rough: 0.9,
+          noise: 0.1,
+          noiseScale: 2,
+          rim: stone ? 0.15 : canopy ? 0.22 : 0.4,
+          wind: WIND[k] ?? 0,
+          side: canopy || stone ? THREE.DoubleSide : THREE.FrontSide,
+          backShade: canopy ? 0.72 : 0.45,
+          nearFade: canopy ? 0.45 : stone ? 0.3 : 0,
+          fadeMinY: FADE_MIN_Y[k],
+          spec: 0.5,
+        });
         mats.set(k, m);
       }
       return m;

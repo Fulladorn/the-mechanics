@@ -37,10 +37,10 @@ try {
   browser = await puppeteer.launch({
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-    args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--window-size=1280,720'],
+    args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--window-size=960,540', '--js-flags=--max-old-space-size=2048'],
   });
   const page = await browser.newPage();
-  await page.setViewport({ width: 1280, height: 720 });
+  await page.setViewport({ width: 960, height: 540 });
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`http://localhost:${PORT}/?level=${LEVEL}&q=low`, { waitUntil: 'load', timeout: 60000 });
   await page.waitForFunction(() => window.__mech?.game() && !window.__mech.game().inIntro, { timeout: 180000 });

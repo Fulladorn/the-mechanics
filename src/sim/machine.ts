@@ -171,6 +171,8 @@ export const TORQUE_BAND_ASSIST: [number, number] = [0.5, 0.9];
 export const LOOSEN_TIME = 0.45;
 
 const boltKey = (slot: string, i: number) => `${slot}#${i}`;
+/** "lug nuts" for five, "hold-down bolt" for one. */
+const plural = (noun: string, n: number) => (n === 1 ? noun : `${noun}s`);
 
 /**
  * The next thing to do on a system. `targets` are the exact interactable ids
@@ -465,7 +467,7 @@ export class Machine {
           const loose = bolts.filter((b) => b.s === 'out').length;
           if (loose < total) {
             const next = bolts.findIndex((b) => b.s !== 'out');
-            return { text: `Loosen the ${this.whose(c)}${noun}s — ${loose}/${total} off`, pos: this.boltPos(pid, next), targets: boltIds(pid, (b) => b.s !== 'out') };
+            return { text: `Loosen the ${this.whose(c)}${plural(noun, total)} — ${loose}/${total} off`, pos: this.boltPos(pid, next), targets: boltIds(pid, (b) => b.s !== 'out') };
           }
           if (c.lift && !this.jackRaised(c.lift)) return this.jackHint(c.lift, ctx);
           return { text: `Take off the ${c.label ? c.label.toLowerCase() : itemLabel(it).toLowerCase()}`, pos: at, targets: [T('slot', pid)] };
@@ -474,13 +476,17 @@ export class Machine {
           if (c.lift && !this.jackRaised(c.lift)) return this.jackHint(c.lift, ctx);
           const held = ctx.held();
           const label = ITEM_DEFS[c.accepts].label.toLowerCase();
-          if (held && held.kind === c.accepts && held.cond === 'good') return { text: `Fit the ${label} onto the ${c.label ? c.label.toLowerCase().replace(/ wheel$/, '') + ' hub' : 'hub'}`, pos: at, targets: [T('slot', pid)] };
+          if (held && held.kind === c.accepts && held.cond === 'good') {
+            // wheels go onto a hub ("onto the rear-left hub"); anything else just goes in
+            const where = c.accepts === 'wheel' ? ` onto the ${(c.label ?? '').toLowerCase().replace(/ wheel$/, '')} hub`.replace('  ', ' ') : '';
+            return { text: `Fit the ${label}${where}`, pos: at, targets: [T('slot', pid)] };
+          }
           return { text: `Find a good ${label}`, need: c.accepts, where: c.where, pos: at, targets: [] };
         }
         const tight = bolts.filter((b) => b.s === 'tight').length;
         if (tight < total) {
           const next = bolts.findIndex((b) => b.s !== 'tight');
-          return { text: `Torque the ${this.whose(c)}${noun}s — ${tight}/${total} tight`, pos: this.boltPos(pid, next), targets: boltIds(pid, (b) => b.s !== 'tight') };
+          return { text: `Torque the ${this.whose(c)}${plural(noun, total)} — ${tight}/${total} tight`, pos: this.boltPos(pid, next), targets: boltIds(pid, (b) => b.s !== 'tight') };
         }
         if (c.terminals) {
           const t = s.terminals[c.terminals];
@@ -551,7 +557,7 @@ export class Machine {
     if (off < bolts.length) {
       const next = bolts.findIndex((b) => b.s !== 'out');
       return {
-        text: `Loosen the ${this.whose(c)}${c.boltNoun ?? 'bolt'}s — ${off}/${bolts.length} off`,
+        text: `Loosen the ${this.whose(c)}${plural(c.boltNoun ?? 'bolt', bolts.length)} — ${off}/${bolts.length} off`,
         pos: this.boltPos(slotId, next),
         targets: bolts.flatMap((b, i) => (b.s !== 'out' ? [T('bolt', `${slotId}#${i}`)] : [])),
       };
@@ -790,7 +796,7 @@ export class Machine {
         const loose = bolts.filter((b) => b.s === 'out').length;
         let why: string | null = access;
         if (!why && held) why = `Hands full — put the ${itemLabel(held).toLowerCase()} down (G to drop)`;
-        if (!why && loose < bolts.length) why = `Loosen the ${noun}s first — aim at one, hold left mouse (${loose}/${bolts.length} off)`;
+        if (!why && loose < bolts.length) why = `Loosen the ${plural(noun, bolts.length)} first — aim at ${bolts.length > 1 ? 'one' : 'it'}, hold left mouse (${loose}/${bolts.length} off)`;
         if (!why && c.terminals) {
           const t = s.terminals[c.terminals];
           if (t.pos || t.neg) why = 'Unclip the terminals first';

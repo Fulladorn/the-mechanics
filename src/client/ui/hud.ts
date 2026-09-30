@@ -153,6 +153,25 @@ export class Hud {
     }
   }
 
+  /**
+   * The prompt sits a little below the crosshair (clear of the part you're
+   * working on) but never under the Dispatch subtitle or the carry line: it
+   * rides up above whichever of them is showing.
+   */
+  private placePrompt(): void {
+    const want = innerHeight / 2 + 70;
+    let floor = innerHeight;
+    for (const el of [this.radio, this.carry]) {
+      if (!el.classList.contains('show')) continue;
+      floor = Math.min(floor, el.getBoundingClientRect().top);
+    }
+    const h = this.prompt.offsetHeight || 40;
+    const below = Math.min(want, floor - h - 10);
+    // no room under the crosshair (a long line on a short screen): flip above it
+    const top = below >= innerHeight / 2 + 24 ? below : innerHeight / 2 - 28 - h;
+    this.set('promptTop', String(Math.round(top)), () => (this.prompt.style.top = `${Math.round(top)}px`));
+  }
+
   /** A live line under the puzzle help: how close you are. */
   panelProgress(text: string): void {
     let el = this.panelHelp.querySelector('.progress') as HTMLElement | null;
@@ -222,6 +241,7 @@ export class Hud {
       });
       this.prompt.classList.toggle('disabled', !!f.disabled);
       this.prompt.classList.add('show');
+      this.placePrompt();
     } else {
       this.prompt.classList.remove('show');
     }

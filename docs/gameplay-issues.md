@@ -27,6 +27,8 @@ problems below were found by it.
 | 10 | Driving / travel steps | Routes are signposted; arriving completes the step | — | Needs a driving bot or manual pass | Open |
 | 11 | Puzzle panels | A puzzle explains its rule and shows progress | — | Screenshot review | Open (P3-3) |
 | 12 | Failure without recovery | Every fail state has a clear retry and a reason | — | Screenshot review | Open (P3-3) |
+| 13 | HUD collisions | Prompts, subtitles and carry lines never cover each other or the part you're working on | `Hud.placePrompt()`: the prompt sits below the crosshair, rises above the subtitle and carry line, and flips above the crosshair when there's no room | `node tools/walkthrough.mjs <level>` (per-step screenshots) | Fixed |
+| 14 | Wording | Step text reads naturally: singular/plural by count, 'hub' only for wheels | `plural()` in machine.ts | Walkthrough step list | Fixed |
 
 ## Found and fixed by the guidance bot (so far)
 - "Inspect" beats had nothing to point at (both levels).

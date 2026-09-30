@@ -351,10 +351,10 @@ export function makeRidge(): LevelDef {
     const held = w.heldItem();
     if (needSiphon && held?.kind === 'jerrycan') return { marker: rvFiller, targets: ['station:siphon'] };
     if (held && (needFuelLine || needRadHose || needSiphon)) {
-      const label = held.kind === 'jerrycan' ? 'jerry can' : held.kind === 'fuelHose' ? 'fuel line' : held.kind === 'radiatorHose' ? 'radiator hose' : itemLabel(held).toLowerCase();
+      const label = itemLabel(held).toLowerCase();
       if (!w.worthKeeping(held)) return { marker: w.playerPos(), targets: [], drop: label };
       const rack = w.stowRack();
-      if (rack) return { marker: rack.world(rack.def.rack!), targets: [`vehicle:${rack.key}:rack`], stow: held.kind === 'jerrycan' ? 'jerry can' : held.kind === 'fuelHose' ? 'fuel line' : held.kind === 'radiatorHose' ? 'radiator hose' : 'load' };
+      if (rack) return { marker: rack.world(rack.def.rack!), targets: [`vehicle:${rack.key}:rack`], stow: label };
     }
     const fetch = (kind: ItemKind, good = true, emptyOk = false) => {
       const where = w.whereIs(kind, good, emptyOk);

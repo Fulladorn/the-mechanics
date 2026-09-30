@@ -10,8 +10,19 @@ how, and that doing it works reliably.
 
 **The main check** is `test/guidance.spec.ts`. A bot plays both levels using
 only what a player sees: the waypoint, the next-step glow and the prompt text,
-never internal ids. When it gets stuck, the failure names the step. Most of the
-problems below were found by it.
+never internal ids. It covers the whole tutorial up to "start her up" and every
+on-foot step of the Ridge; driving beats are stood in by placing the quad (see
+#10). When it gets stuck, the failure names the step. Most of the problems below
+were found by it.
+
+**How to run the checks.**
+- `npm test` includes the guidance bot, `lugnuts`, `interact.audit` and
+  `settings`.
+- `node tools/targetcheck.mjs` is the drawn-vs-clickable audit, run in the
+  real renderer. It takes a few minutes.
+- `node tools/walkthrough.mjs depot|ridge` saves a screenshot per step to
+  `walkthrough-<level>/`. Review them like a first-time player would. Don't
+  edit files while it runs.
 
 | # | Class | Rule | Shared fix | Check | Status |
 |---|---|---|---|---|---|
@@ -20,15 +31,16 @@ problems below were found by it.
 | 3 | Focus theft | A disabled prompt never beats a usable one under the crosshair | `DISABLED_PENALTY` in `pickFocus`; sticky focus while holding | `test/lugnuts.spec.ts` (wobble), guidance bot | Fixed |
 | 4 | Steps without exact targets | Every step names its target(s), its side, and its progress | `Step.targets` from `Machine.nextStep` / `removeStep`; `BeatDef.targets`; the next-step glow | Guidance bot | Fixed for all machine steps, both levels' beats |
 | 5 | Inventory dead-ends | One pair of hands: the game says what to do with what you're holding | `World.handsFor` (stow worthwhile parts on a nearby rack, else "put it down (G)"); the rack is a flatbed (take any part by looking at it); "Hands full" shown on the blocked prompt | Guidance bot (Ridge RV raid, battery swap) | Fixed |
-| 6 | Multi-part progress | Every repeated action shows its count | Prompt suffix "· 3/5 off"; toast; step text "— 1/5 off"; a nut visibly drops | Guidance bot (stuck detection) | Fixed for bolts; check other repeats in P3-3 |
+| 6 | Multi-part progress | Every repeated action shows its count | Prompt suffix "· 3/5 off"; toast; step text "— 1/5 off"; a nut visibly drops | Guidance bot (stuck detection) | Fixed for bolts; other repeats (terminals, clamps, chocks) to confirm |
 | 7 | Salvage without guidance | Taking parts off donors is guided like repairs | `Machine.removeStep` | Guidance bot | Fixed (pickup wheel, logging-truck battery) |
 | 8 | Waypoint on the wrong spot | The waypoint sits on the next target (floats only when far) | Beat markers use `World.markerFor`; the HUD offset scales with distance | Guidance bot | Fixed (generator cord, station door, racked parts) |
-| 9 | Browser shortcuts | No default binding collides with browser shortcuts | Crouch on C (migrated); leave-page confirm; keyboard lock in fullscreen | `test/settings.spec.ts` | Fixed |
+| 9 | Browser shortcuts | No default binding collides with browser shortcuts | Crouch on C (migrated); leave-page confirm; keyboard lock in fullscreen | `test/settings.spec.ts` (migration; the page guard and keyboard lock are untested) | Fixed |
 | 10 | Driving / travel steps | Routes are signposted; arriving completes the step | — | Needs a driving bot or manual pass | Open |
-| 11 | Puzzle panels | A puzzle explains its rule and shows progress | Rule text on open plus a live progress line ('6/9 fuses green', '2/3 gauges in the green — pull the lever') | Screenshot review | Fixed |
+| 11 | Puzzle panels | A puzzle explains its rule and shows progress | Rule text on open plus a live progress line (`Hud.panelProgress`) ('6/9 fuses green', '2/3 gauges in the green — pull the lever') | Screenshot review | Fixed |
 | 12 | Failure without recovery | Every fail state has a clear retry, a reason and a tip about what actually did it | Fail screens take `World.lastHurtBy` (wolf / fall / crash); checkpoint retry | Screenshot review | Fixed |
 | 13 | HUD collisions | Prompts, subtitles and carry lines never cover each other or the part you're working on | `Hud.placePrompt()`: the prompt sits below the crosshair, rises above the subtitle and carry line, and flips above the crosshair when there's no room | `node tools/walkthrough.mjs <level>` (per-step screenshots) | Fixed |
 | 14 | Wording | Step text reads naturally: singular/plural by count, 'hub' only for wheels | `plural()` in machine.ts | Walkthrough step list | Fixed |
+| 15 | Stale hints | A hint never contradicts the current state ("look at the sawmill" when the part is already on your rack) | Empty-mount hints ask `MachineCtx.locate()` first; stow text uses real item names | `test/guidance.spec.ts` (hints stay true); walkthrough step list | Fixed |
 
 ## Found and fixed by the guidance bot (so far)
 - "Inspect" beats had nothing to point at (both levels).
@@ -51,6 +63,12 @@ problems below were found by it.
   not linked to anything drawn, so they couldn't glow.
 - The mine's foreman's logbook was an invisible interaction. There's now a book
   on a crate by the lantern.
+
+## Found by the player's-eye walkthrough (`tools/walkthrough.mjs`)
+- The Dispatch subtitle covered the action prompt, and the waypoint diamond sat on top of it.
+- "Fit the battery onto the battery hub"; "hold-down bolts — 0/1".
+- "Strap the load to the quad's rack" (a placeholder name instead of the item's).
+- An empty battery mount said "look in the logging truck at the sawmill" while the salvaged battery was already strapped to the quad.
 
 ## How to add to this
 When a playtest turns up a problem, first ask which class it belongs to. If

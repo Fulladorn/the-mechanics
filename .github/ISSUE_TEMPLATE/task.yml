@@ -1,28 +1,34 @@
 name: Task
 description: A PM-generated work item for a sub-agent or human contributor.
-title: "[Phase X] "
+title: ""
 labels: []
 body:
   - type: dropdown
-    id: phase
+    id: area
     attributes:
-      label: Roadmap phase
-      description: Which phase does this task belong to?
+      label: Area
       options:
-        - "P0 — Foundation"
-        - "P1 — Movement"
-        - "P2 — Multiplayer"
-        - "P3 — Interaction & Inventory"
-        - "P4 — Repair Core"
-        - "P5 — Drive Phase"
-        - "P6 — Survival & Combat"
-        - "P7 — Level 1 Mountains"
-        - "P8 — Level 2 Ocean"
-        - "P9 — Level 3 Moon"
-        - "P10 — Meta, UX & Voice"
-        - "P11 — Polish & Ship"
+        - "sim (rules, machines, physics)"
+        - "content / levels"
+        - "render / art"
+        - "HUD / UI"
+        - "audio"
+        - "input / settings"
+        - "tools / tests"
+        - "docs / process"
     validations:
       required: true
+
+  - type: input
+    id: issue-class
+    attributes:
+      label: Gameplay issue class
+      description: >
+        For gameplay problems: the row number in docs/gameplay-issues.md
+        (e.g. "#4 Steps without exact targets"), or "new class" if none fits.
+        Leave blank otherwise.
+    validations:
+      required: false
 
   - type: dropdown
     id: type
@@ -43,7 +49,7 @@ body:
     attributes:
       label: Priority
       options:
-        - "p0 — blocking phase completion"
+        - "p0 — broken or blocking play"
         - "p1 — needed this week"
         - "p2 — backlog"
     validations:
@@ -68,8 +74,8 @@ body:
     attributes:
       label: Context
       description: >
-        One or two sentences connecting this task to a roadmap phase and design
-        pillar. Reference the relevant section of ROADMAP.md or GAME_DESIGN.md.
+        One or two sentences on why this matters. Link the relevant section of
+        docs/ROADMAP.md, docs/GAME_DESIGN.md or docs/gameplay-issues.md.
     validations:
       required: true
 
@@ -79,7 +85,7 @@ body:
       label: What to build / change
       description: >
         Bullet list of concrete deliverables. Reference specific files/modules
-        where known (e.g. `src/sim/movement.ts`, `content/levels/mountains.ts`).
+        where known (e.g. `src/sim/machine.ts`, `src/content/levels/ridge.ts`).
       placeholder: |
         - `src/sim/foo.ts` — add X
         - `src/client/bar.ts` — wire Y to Z
@@ -103,10 +109,11 @@ body:
     attributes:
       label: Tests required
       description: >
-        Which test file(s) should be added or updated? Reference the acceptance
-        criteria they cover. Leave blank only if this is a docs/config-only change.
+        Which test file(s) (test/**/*.spec.ts) or checks (targetcheck, walkthrough,
+        playtest) prove it? Reference the acceptance criteria they cover. Leave blank only if this is a docs/config-only change.
       placeholder: |
-        - `test/foo.test.ts` — covers criteria 1 and 2
+        - `test/foo.spec.ts` — covers criteria 1 and 2
+        - `node tools/targetcheck.mjs` clean / walkthrough screenshots reviewed
     validations:
       required: false
 

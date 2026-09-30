@@ -163,6 +163,8 @@ export interface MachineCtx {
   flag(name: string): boolean;
   /** Accessibility: wider torque band. */
   assist: boolean;
+  /** Where a good one of these is right now, in words ("strapped to the ATV's rack"), if you've got one somewhere. */
+  locate?(kind: ItemKind): string | null;
 }
 
 export const TORQUE_RATE = 0.8; // gauge units per second
@@ -856,7 +858,13 @@ export class Machine {
         label: `Empty: needs a ${need}`,
         verb: 'tap',
         priority: -2,
-        disabled: held ? `That's a ${itemLabel(held).toLowerCase()} — put it down (G) and bring a ${need}` : c.where ? `Look ${c.where}` : 'Find one',
+        disabled: held
+          ? `That's a ${itemLabel(held).toLowerCase()} — put it down (G) and bring a ${need}`
+          : (() => {
+              // where one actually is now beats where the level said to look
+              const now = ctx.locate?.(c.accepts);
+              return now ? `There's one ${now}` : c.where ? `Look ${c.where}` : 'Find one';
+            })(),
         target: tgt('ghost', c.id),
       });
     }

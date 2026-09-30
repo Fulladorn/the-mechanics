@@ -27,6 +27,7 @@ coverage/
 .nyc_output/
 test-results/
 screenshots/
+walkthrough-*/
 *.tour.png
 
 # Editor / OS
@@ -36,10 +37,3 @@ screenshots/
 !.vscode/extensions.json
 !.vscode/settings.shared.json
 *.swp
-
-# Asset working files (keep source-of-truth glTF in content/, ignore exports)
-content/assets/_raw/
-*.blend1
-
-# Postgres local data
-pgdata/

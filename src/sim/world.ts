@@ -169,6 +169,12 @@ export class World {
       items: this.items,
       held: () => this.items.get(this.player.held),
       hasTool: (k) => this.hasItem(k),
+      locate: (k) => {
+        const w = this.whereIs(k);
+        if (w.at === 'rack') return `strapped to the ${this.vehicle(w.vehicle!).def.name}'s rack`;
+        if (w.at === 'belt') return 'on your belt';
+        return null;
+      },
       takeHeld: () => {
         const it = this.items.get(this.player.held);
         this.player.held = null;

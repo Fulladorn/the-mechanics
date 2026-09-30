@@ -29,6 +29,7 @@ problems below were found by it.
 | 12 | Failure without recovery | Every fail state has a clear retry, a reason and a tip about what actually did it | Fail screens take `World.lastHurtBy` (wolf / fall / crash); checkpoint retry | Screenshot review | Fixed |
 | 13 | HUD collisions | Prompts, subtitles and carry lines never cover each other or the part you're working on | `Hud.placePrompt()`: the prompt sits below the crosshair, rises above the subtitle and carry line, and flips above the crosshair when there's no room | `node tools/walkthrough.mjs <level>` (per-step screenshots) | Fixed |
 | 14 | Wording | Step text reads naturally: singular/plural by count, 'hub' only for wheels | `plural()` in machine.ts | Walkthrough step list | Fixed |
+| 15 | Stale hints | A hint never contradicts the current state ("look at the sawmill" when the part is already on your rack) | Empty-mount hints ask `MachineCtx.locate()` first; stow text uses real item names | `test/guidance.spec.ts` (hints stay true); walkthrough step list | Fixed |
 
 ## Found and fixed by the guidance bot (so far)
 - "Inspect" beats had nothing to point at (both levels).
@@ -51,6 +52,12 @@ problems below were found by it.
   not linked to anything drawn, so they couldn't glow.
 - The mine's foreman's logbook was an invisible interaction. There's now a book
   on a crate by the lantern.
+
+## Found by the player's-eye walkthrough (`tools/walkthrough.mjs`)
+- The Dispatch subtitle covered the action prompt, and the waypoint diamond sat on top of it.
+- "Fit the battery onto the battery hub"; "hold-down bolts — 0/1".
+- "Strap the load to the quad's rack" (a placeholder name instead of the item's).
+- An empty battery mount said "look in the logging truck at the sawmill" while the salvaged battery was already strapped to the quad.
 
 ## How to add to this
 When a playtest turns up a problem, first ask which class it belongs to. If

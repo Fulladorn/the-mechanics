@@ -47,3 +47,23 @@ describe('guidance: a first-timer can follow it', () => {
     for (const sys of ['wheel', 'battery', 'fuel', 'coolant', 'ignition']) expect(w.systemOk('ridgeback', sys)).toBe(true);
   });
 });
+
+describe('hints stay true', () => {
+  it('an empty mount points at the part where it actually is, not where it started', async () => {
+    const w = await World.create(makeRidge());
+    const m = w.machine('ridgeback');
+    const atv = w.vehicle('atv');
+    // a good battery strapped to the quad
+    const batt = w.items.list.find((i) => i.kind === 'battery' && i.cond === 'good')!;
+    w.items.take(batt, 'racked');
+    atv.rack.push(batt.id);
+    // pull the dead one so the mount is empty
+    const dead = m.slotItem(w.items, 'battery')!;
+    m.state.slots.battery = null;
+    w.items.take(dead, 'gone');
+    m.state.covers.hood = true;
+    const ctx = w.ctx;
+    const empty = m.interactables(ctx, m.world(m.comp('battery').pos), 3).find((c) => c.id.endsWith(':slot:battery'))!;
+    expect(empty.disabled).toMatch(/strapped to the .*rack/);
+  });
+});

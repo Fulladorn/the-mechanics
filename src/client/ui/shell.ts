@@ -42,7 +42,7 @@ const FAIL_TEXT: Record<FailReason, { head: string; body: string; tip: string }>
 /** "You went down" — the tip should be about what actually did it. */
 const DOWNED_BY: Record<string, { body?: string; tip: string }> = {
   wolf: { tip: 'Wolves hate fire. Put a flare on your belt, select it and click to light it — they won’t come near. Right mouse blocks a bite.' },
-  fall: { body: 'That drop was further than it looked.', tip: 'Walk down slopes instead of jumping off them; long falls hurt. Crouch (C) near edges.' },
+  fall: { body: 'That drop was further than it looked.', tip: 'Walk down slopes instead of jumping off them; long falls hurt, and crouching near an edge keeps you on it.' },
   crash: { body: 'The vehicle stopped. You didn’t.', tip: 'Ease off on the rough stuff and brake before the hairpins.' },
 };
 

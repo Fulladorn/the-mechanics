@@ -59,6 +59,23 @@ try {
       const bot = window.__bot;
       let err = null;
       if (g.world.currentBeat()?.id === until) return { done: true };
+      // Where a player would drive, the bot arrives (as in test/guidance.spec.ts).
+      const w = g.world;
+      const car = () => w.vehicle('ridgeback');
+      const bringAtv = (p) => { const x = p.x + 3, z = p.z + 3; w.vehicle('atv').place({ x, y: w.terrain.heightAt(x, z) + 0.8, z }, 0); };
+      const stand = w.level.id !== 'ridge' ? undefined : {
+        ride: () => { const c = car().pos; w.teleport({ x: c.x + 4, y: w.terrain.heightAt(c.x + 4, c.z + 6) + 0.1, z: c.z + 6 }); bringAtv({ x: c.x + 5, z: c.z + 9 }); },
+        sawmill: () => bringAtv(w.marker()),
+        camp: () => bringAtv(w.marker()),
+        fitbattery: () => bringAtv({ x: car().pos.x + 5, z: car().pos.z + 9 }),
+      };
+      window.__stood ??= new Set();
+      const beat = w.currentBeat()?.id;
+      if (stand?.[beat] && !window.__stood.has(beat)) {
+        window.__stood.add(beat);
+        stand[beat]();
+        bot.tick(3);
+      }
       try {
         bot.follow({ until: () => false, maxMoves: 1 });
       } catch (e) {

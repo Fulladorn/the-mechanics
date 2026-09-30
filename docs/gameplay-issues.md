@@ -25,8 +25,8 @@ problems below were found by it.
 | 8 | Waypoint on the wrong spot | The waypoint sits on the next target (floats only when far) | Beat markers use `World.markerFor`; the HUD offset scales with distance | Guidance bot | Fixed (generator cord, station door, racked parts) |
 | 9 | Browser shortcuts | No default binding collides with browser shortcuts | Crouch on C (migrated); leave-page confirm; keyboard lock in fullscreen | `test/settings.spec.ts` | Fixed |
 | 10 | Driving / travel steps | Routes are signposted; arriving completes the step | — | Needs a driving bot or manual pass | Open |
-| 11 | Puzzle panels | A puzzle explains its rule and shows progress | — | Screenshot review | Open (P3-3) |
-| 12 | Failure without recovery | Every fail state has a clear retry and a reason | — | Screenshot review | Open (P3-3) |
+| 11 | Puzzle panels | A puzzle explains its rule and shows progress | Rule text on open plus a live progress line ('6/9 fuses green', '2/3 gauges in the green — pull the lever') | Screenshot review | Fixed |
+| 12 | Failure without recovery | Every fail state has a clear retry, a reason and a tip about what actually did it | Fail screens take `World.lastHurtBy` (wolf / fall / crash); checkpoint retry | Screenshot review | Fixed |
 | 13 | HUD collisions | Prompts, subtitles and carry lines never cover each other or the part you're working on | `Hud.placePrompt()`: the prompt sits below the crosshair, rises above the subtitle and carry line, and flips above the crosshair when there's no room | `node tools/walkthrough.mjs <level>` (per-step screenshots) | Fixed |
 | 14 | Wording | Step text reads naturally: singular/plural by count, 'hub' only for wheels | `plural()` in machine.ts | Walkthrough step list | Fixed |
 

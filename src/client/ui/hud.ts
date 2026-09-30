@@ -261,7 +261,10 @@ export class Hud {
     this.set('clk', `${hh}:${mm}`, () => (this.objClock.textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`));
 
     // waypoint
-    const mk = c.cinematic || c.panel ? null : w.marker();
+    // Once you're aiming at what the step wants, the waypoint has done its job
+    // (and would sit right on top of the prompt).
+    const onIt = !!w.focus && w.guide().some((g) => g.id === w.focus!.id);
+    const mk = c.cinematic || c.panel || onIt ? null : w.marker();
     if (mk) {
       const d = Math.hypot(mk.x - c.camPos.x, mk.y - c.camPos.y, mk.z - c.camPos.z);
       // Float above far targets (a building); sit on near ones (a lug nut).

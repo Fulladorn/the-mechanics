@@ -4,6 +4,7 @@ import type { SimEvent } from '../sim/events';
 import type { LevelDef } from '../content/levels/types';
 import { DT } from '../shared/constants';
 import { ITEM_DEFS } from '../sim/items';
+import { gaugeOk } from '../sim/puzzles/valveBalance';
 import { GameView } from './render/view';
 import { Hud } from './ui/hud';
 import { icon } from './ui/icons';
@@ -162,6 +163,18 @@ export class Game {
 
   private updatePanelMode(): void {
     const w = this.world;
+    if (w.panel) {
+      const m = w.machine(w.panel.machine);
+      const f = m.fuse.get(w.panel.panel);
+      const v = m.valve.get(w.panel.panel);
+      if (f) {
+        const on = f.lit.filter(Boolean).length;
+        this.hud.panelProgress(on === f.lit.length ? 'All green — done' : `${on}/${f.lit.length} fuses green`);
+      } else if (v) {
+        const ok = v.coupling.filter((_, g) => gaugeOk(v, g)).length;
+        this.hud.panelProgress(ok === v.valves.length ? 'All in the green — pull the yellow lever' : `${ok}/${v.valves.length} gauges in the green`);
+      }
+    }
     const key = w.panel ? `${w.panel.machine}:${w.panel.panel}` : '';
     if (key === this.panelKey) return;
     this.panelKey = key;
@@ -242,10 +255,20 @@ export class Game {
       case 'drop':
         a?.play(e.thrown ? 'throw' : 'drop');
         break;
-      case 'boltLoose':
+      case 'boltLoose': {
         a?.play('ratchetOut', e.pos);
         v.sparks(e.pos);
+        const [slotId] = e.bolt.split('#');
+        const m = this.world.machine(e.machine);
+        const slot = m.def.components.find((c) => c.id === slotId);
+        if (slot?.t === 'slot') {
+          const all = m.boltsOf(slot);
+          const off = all.filter((b) => b.s === 'out').length;
+          const noun = slot.boltNoun ?? 'bolt';
+          h.toast(off === all.length ? `All ${noun}s off` : `${noun[0].toUpperCase()}${noun.slice(1)} off · ${off}/${all.length}`);
+        }
         break;
+      }
       case 'boltTight':
         a?.play('boltClick', e.pos);
         v.sparks(e.pos);

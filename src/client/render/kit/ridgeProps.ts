@@ -245,8 +245,10 @@ function rv(p: PropDef): PropBuild {
     for (const x of [-2, 0.6, 2.8]) g.add(mesh(rbox(1.1, 0.6, 0.03, 0.03), glass, x, y0 + 2.1, sz * 1.21));
   }
   // storage bin (the +Z side, near the back) and the fuel filler
-  g.add(mesh(rbox(0.9, 0.5, 0.03, 0.03), styl({ color: 0xcfc6b0, rough: 0.5 }), -1.6, y0 + 0.45, 1.215));
-  g.add(mesh(cyl(0.06, 0.06, 0.04, 12), MAT.chrome(), 2.6, y0 + 0.55, 1.22).rotateX(Math.PI / 2));
+  const bin = mesh(rbox(0.9, 0.5, 0.03, 0.03), styl({ color: 0xcfc6b0, rough: 0.5 }), -1.6, y0 + 0.45, 1.215);
+  g.add(bin);
+  const filler = mesh(cyl(0.06, 0.06, 0.04, 12), MAT.chrome(), 2.6, y0 + 0.55, 1.22).rotateX(Math.PI / 2);
+  g.add(filler);
   g.add(mesh(rbox(0.9, 1.9, 0.03, 0.02), styl({ color: 0xd8cfb8, rough: 0.5 }), 1.2, y0 + 1.25, 1.215));
   // awning + ladder + a camp chair
   const awn = mesh(rbox(3.4, 0.04, 1.8, 0.02), styl({ color: 0x3d7ea6, rough: 0.8, side: THREE.DoubleSide }), 0.6, y0 + 2.7, 2.2);
@@ -262,7 +264,7 @@ function rv(p: PropDef): PropBuild {
       g.add(w);
     }
   g.add(mesh(rbox(0.5, 0.06, 0.5, 0.02), styl({ color: 0x2f7a5a, rough: 0.8 }), 1.8, 0.45, 3.6));
-  return { obj: shadows(g) };
+  return { obj: shadows(g), targets: new Map<string, THREE.Object3D>([['station:rvBin', bin], ['station:siphon', filler]]) };
 }
 
 function campfire(p: PropDef, w: World): PropBuild {
@@ -588,6 +590,18 @@ function mineCart(): PropBuild {
   return { obj: shadows(g) };
 }
 
+/** A lore logbook on a crate: the station it belongs to is `p.station`. */
+function logbook(p: PropDef): PropBuild {
+  const g = new THREE.Group();
+  g.add(mesh(rbox(0.5, 0.5, 0.4, 0.03), MAT.wood(0x7a5a3a), 0, -0.25, 0));
+  const book = new THREE.Group();
+  book.add(mesh(rbox(0.26, 0.04, 0.2, 0.01), styl({ color: 0x5a2a22, rough: 0.8 }), 0, 0.02, 0));
+  book.add(mesh(rbox(0.24, 0.03, 0.18, 0.005), styl({ color: 0xe8dfc6, rough: 0.9 }), 0.005, 0.025, 0));
+  book.rotation.y = 0.35;
+  g.add(book);
+  return { obj: g, targets: new Map<string, THREE.Object3D>([[`station:${str(p, 'station', 'log')}`, book]]) };
+}
+
 function lantern(): PropBuild {
   const g = new THREE.Group();
   g.add(mesh(cyl(0.08, 0.1, 0.22, 10), MAT.glass(0xffe2a0, 0.5), 0, 0.11, 0));
@@ -799,6 +813,7 @@ export const RIDGE_PROPS = {
   lookout,
   minePortal,
   mineTunnel,
+  logbook,
   mineCart,
   lantern,
   bridge,

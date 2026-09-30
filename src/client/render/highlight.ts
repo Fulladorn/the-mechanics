@@ -48,10 +48,39 @@ export class Highlight {
   private ghostWarn = rimMaterial(new THREE.Color(0xffc15a), 0.22, 1.6, 0.8);
   private ghosts = new Map<string, THREE.Object3D>();
   private t = 0;
+  // Hint layer: a soft, slow amber breath on what the current step wants.
+  private hintGroup = new THREE.Group();
+  // Strong enough to read on chrome under shop lights: a warm fill plus rim.
+  private hintMat = rimMaterial(new THREE.Color(0xffb13a), 0.55, 1.4, 1.0);
+  private hintPairs: { src: THREE.Mesh; copy: THREE.Mesh }[] = [];
+  private hintKey = '';
 
   constructor(scene: THREE.Scene) {
     this.focusGroup.renderOrder = 10;
     scene.add(this.focusGroup);
+    this.hintGroup.renderOrder = 9;
+    scene.add(this.hintGroup);
+  }
+
+  /** Softly mark the things the current step wants (not the focused one: that has its own glow). */
+  hint(objs: THREE.Object3D[]): void {
+    const key = objs.map((o) => o.uuid).join(',');
+    if (key === this.hintKey) return;
+    this.hintKey = key;
+    this.hintGroup.clear();
+    this.hintPairs = [];
+    for (const obj of objs) {
+      obj.traverse((o) => {
+        if (!(o instanceof THREE.Mesh) || !o.visible) return;
+        const m = o.material as THREE.Material;
+        if (m.transparent && (m as THREE.MeshStandardMaterial).opacity === 0) return;
+        const copy = new THREE.Mesh(o.geometry, this.hintMat);
+        copy.matrixAutoUpdate = false;
+        copy.renderOrder = 9;
+        this.hintGroup.add(copy);
+        this.hintPairs.push({ src: o, copy });
+      });
+    }
   }
 
   /** Point the glow at an object (or nothing). */
@@ -108,6 +137,12 @@ export class Highlight {
     this.t += dt;
     const pulse = 0.5 + 0.5 * Math.sin(this.t * 5);
     for (const m of [this.focusMat, this.disabledMat, this.ghostMat, this.ghostWarn]) m.uniforms.uPulse.value = pulse;
+    this.hintMat.uniforms.uPulse.value = 0.5 + 0.5 * Math.sin(this.t * 2.6);
+    for (const p of this.hintPairs) {
+      p.src.updateWorldMatrix(true, false);
+      p.copy.matrix.copy(p.src.matrixWorld);
+      p.copy.visible = p.src.visible;
+    }
     for (const p of this.pairs) {
       p.src.updateWorldMatrix(true, false);
       p.copy.matrix.copy(p.src.matrixWorld);

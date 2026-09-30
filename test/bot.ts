@@ -38,6 +38,13 @@ export class Bot {
     this.aim(p);
   }
 
+  /** Point the view at p without stepping (for tracking a target while holding a button). */
+  point(p: Vec3): void {
+    const e = this.w.player.eye();
+    this.intent.yaw = Math.atan2(-(p.x - e.x), -(p.z - e.z));
+    this.intent.pitch = Math.atan2(p.y - e.y, Math.hypot(p.x - e.x, p.z - e.z));
+  }
+
   aim(p: Vec3): void {
     const e = this.w.player.eye();
     const dx = p.x - e.x;

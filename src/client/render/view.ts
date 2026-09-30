@@ -45,6 +45,9 @@ export interface FrameInput {
   cine?: { pos: THREE.Vector3; quat: THREE.Quaternion } | null;
 }
 
+/** Missions: seconds on a step before its targets start to glow. */
+const GUIDE_DELAY = 20;
+
 export class GameView {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -72,6 +75,9 @@ export class GameView {
   private tmpV = new THREE.Vector3();
   private tmpV2 = new THREE.Vector2();
   private tmpC = new THREE.Color();
+  private guideBeat = '';
+  private guideIds = new Set<string>();
+  private guideSince = 0;
   private water?: Water;
   private wolves?: WolfPack;
   private ambient = 1;
@@ -479,6 +485,38 @@ export class GameView {
   }
 
   /** Map a focus target id to the object to outline. */
+  /**
+   * Drawn-vs-clickable audit: every nearby target must resolve to something
+   * visible, and its click point must sit on (or within a whisker of) what's
+   * drawn. Returns the offenders.
+   */
+  auditTargets(): { id: string; label: string; problem: string; off?: number }[] {
+    const out: { id: string; label: string; problem: string; off?: number }[] = [];
+    const box = new THREE.Box3();
+    const p = new THREE.Vector3();
+    for (const c of this.world.nearbyInteractables()) {
+      if (!c.target || (c.priority ?? 0) < 0 || c.target.includes(':ghost:')) continue;
+      const o = this.resolveTarget(c.target);
+      if (!o) {
+        out.push({ id: c.id, label: c.label, problem: 'no drawn object' });
+        continue;
+      }
+      let vis = true;
+      for (let q: THREE.Object3D | null = o; q; q = q.parent) if (!q.visible) vis = false;
+      if (!vis) {
+        out.push({ id: c.id, label: c.label, problem: 'clickable but not drawn' });
+        continue;
+      }
+      o.updateWorldMatrix(true, true);
+      box.setFromObject(o);
+      if (box.isEmpty()) continue;
+      const off = box.distanceToPoint(p.set(c.pos.x, c.pos.y, c.pos.z));
+      // Spheres may hover just off a surface; allow a little under their radius.
+      if (off > Math.max(0.03, Math.min(c.r * 0.6, 0.15))) out.push({ id: c.id, label: c.label, problem: 'click point off the drawn part', off: +off.toFixed(3) });
+    }
+    return out;
+  }
+
   private resolveTarget(target: string | undefined): THREE.Object3D | null {
     if (!target) return null;
     if (target.startsWith('item:')) return this.items.get(Number(target.slice(5)))?.obj ?? null;
@@ -498,6 +536,11 @@ export class GameView {
       const o = p.targets?.get(target);
       if (o) return o;
     }
+    // Parts of machine art named after their target (e.g. a generator's cord).
+    for (const mv of this.machines.values()) {
+      const o = mv.root.getObjectByName(target);
+      if (o) return o;
+    }
     return null;
   }
 
@@ -508,6 +551,32 @@ export class GameView {
     // would outline half the screen; the prompt is enough.
     const big = !!f && (f.priority ?? 0) < 0;
     this.highlight.focus(f && !big ? this.resolveTarget(f.target) : null, !!f?.disabled);
+
+    // Next-step glow: softly mark what the current step wants you to use.
+    // Missions hold it back until you've been on a step a while; the
+    // tutorial always shows it. The timer restarts only on a new step (new
+    // targets appearing), not as you tick targets off it.
+    const guide = w.player.mode === 'foot' ? w.guide() : [];
+    const ids = new Set(guide.map((c) => c.id));
+    const beat = w.currentBeat()?.id ?? '';
+    if (beat !== this.guideBeat || [...ids].some((id) => !this.guideIds.has(id))) {
+      this.guideBeat = beat;
+      this.guideSince = w.elapsed;
+    }
+    this.guideIds = ids;
+    const pref = this.settings.accessibility.guidance;
+    const mode = pref === 'auto' ? (this.level.guidance ?? 'delayed') : pref;
+    const on = mode === 'always' || (mode === 'delayed' && w.elapsed - this.guideSince > GUIDE_DELAY);
+    const hints: THREE.Object3D[] = [];
+    if (on) {
+      for (const c of guide) {
+        // (not whole-vehicle targets like "Inspect": the prompt covers those)
+        if (c.id === f?.id || c.disabled || (c.priority ?? 0) < 0) continue;
+        const o = this.resolveTarget(c.target);
+        if (o) hints.push(o);
+      }
+    }
+    this.highlight.hint(hints);
 
     // Ghost the carried part into every slot it fits (nearby), strongest on
     // the one under the crosshair.

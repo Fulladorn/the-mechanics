@@ -41,6 +41,7 @@ export class MachineView {
   private jacks = new Map<string, { def: JackDef; obj: THREE.Group; arm: THREE.Object3D; lift: number }>();
   private clamps = new Map<string, { def: TerminalsDef; pos: THREE.Group; neg: THREE.Group; pT: number; nT: number }>();
   private panels = new Map<string, PanelVis>();
+  private falling: { mesh: THREE.Mesh; vel: THREE.Vector3; t: number; spin: number }[] = [];
   private tmpPanel = new THREE.Vector3();
   private caps = new Map<string, { def: FluidDef; cap: THREE.Mesh }>();
   private hoodT = 0;
@@ -126,15 +127,19 @@ export class MachineView {
     // One nut mesh per bolt, parented where it will move with the part.
     (def.bolts ?? []).forEach((b) => {
       const n = mesh(NUT_GEO(), nutMat());
-      const holder = vis.wheel ? vis.wheel.spin : group;
-      const lx = b.pos.x - def.pos.x;
-      const ly = b.pos.y - def.pos.y;
-      const lz = b.pos.z - def.pos.z;
-      n.position.set(lx, ly, lz);
+      // Nuts hang off the hub pivot (not the rolling, squashing tyre), so
+      // they sit exactly where the sim puts their click targets.
+      const holder = vis.wheel ? vis.wheel.pivot : group;
+      // Bolt positions/normals are in the machine frame; the holder may be
+      // yawed (a hose lying across the engine), so bring them into its frame.
+      const unyaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), vis.wheel ? 0 : -(def.yaw ?? 0));
+      const off = new THREE.Vector3(b.pos.x - def.pos.x, b.pos.y - def.pos.y, b.pos.z - def.pos.z).applyQuaternion(unyaw);
+      n.position.copy(off);
       const nrm = b.normal ?? { x: 0, y: 1, z: 0 };
-      n.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(nrm.x, nrm.y, nrm.z));
+      const nv = new THREE.Vector3(nrm.x, nrm.y, nrm.z).applyQuaternion(unyaw);
+      n.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), nv);
       n.userData.base = n.position.clone();
-      n.userData.normal = new THREE.Vector3(nrm.x, nrm.y, nrm.z);
+      n.userData.normal = nv;
       holder.add(n);
       vis.nuts.push(n);
     });
@@ -230,6 +235,7 @@ export class MachineView {
     this.root.quaternion.slerpQuaternions(this.prevRot, this.curRot, alpha);
     this.root.updateMatrixWorld(true);
     const s = m.state;
+    this.stepFalling(dt);
 
     // Hood.
     if (this.model?.hood) {
@@ -237,6 +243,13 @@ export class MachineView {
       this.hoodT += ((open ? 1 : 0) - this.hoodT) * Math.min(1, dt * 7);
       const e = this.hoodT;
       this.model.hood.rotation.x = this.model.hoodOpen * (e * e * (3 - 2 * e));
+    }
+    // Other named lids (donor battery boxes) swing up about their hinge.
+    for (const [id, open] of Object.entries(s.covers)) {
+      if (id === 'hood' && this.model?.hood) continue;
+      const lid = this.root.getObjectByName(`cover:${id}`);
+      if (!lid) continue;
+      lid.rotation.x += ((open ? -1.9 : 0) - lid.rotation.x) * Math.min(1, dt * 7);
     }
 
     // Wheels spin with the vehicle; parked, they settle to a nut-aligned angle.
@@ -291,7 +304,11 @@ export class MachineView {
       (vis.def.bolts ?? []).forEach((_, i) => {
         const nut = vis.nuts[i];
         const st = s.bolts[`${vis.def.id}#${i}`];
-        nut.visible = hasPart && st.s !== 'out';
+        const show = hasPart && st.s !== 'out';
+        // Came off just now (not the whole part leaving): spin it out and
+        // let it drop, so you see it's off instead of it just blinking out.
+        if (nut.visible && !show && hasPart) this.dropNut(nut);
+        nut.visible = show;
         if (!nut.visible) return;
         const base = nut.userData.base as THREE.Vector3;
         const nrm = nut.userData.normal as THREE.Vector3;
@@ -353,6 +370,43 @@ export class MachineView {
     }
   }
 
+  /** A loosened nut backs off its stud and tumbles to the ground. */
+  private dropNut(nut: THREE.Mesh): void {
+    const n = new THREE.Mesh(nut.geometry, nut.material);
+    nut.updateWorldMatrix(true, false);
+    this.root.updateWorldMatrix(true, false);
+    const local = this.root.worldToLocal(nut.getWorldPosition(new THREE.Vector3()));
+    n.position.copy(local);
+    n.quaternion.copy(nut.quaternion);
+    const out = (nut.userData.normal as THREE.Vector3).clone();
+    this.root.add(n);
+    this.falling.push({ mesh: n, vel: out.multiplyScalar(0.55).add(new THREE.Vector3(0, 0.6, 0)), t: 0, spin: 18 });
+  }
+
+  private stepFalling(dt: number): void {
+    const floor = this.groundY() - this.machine.jackLift() + 0.012;
+    for (let i = this.falling.length - 1; i >= 0; i--) {
+      const f = this.falling[i];
+      f.t += dt;
+      f.vel.y -= 9.8 * dt;
+      f.mesh.position.addScaledVector(f.vel, dt);
+      f.mesh.rotation.x += f.spin * dt;
+      if (f.mesh.position.y < floor) {
+        f.mesh.position.y = floor;
+        f.vel.set(f.vel.x * 0.3, Math.abs(f.vel.y) * 0.25, f.vel.z * 0.3);
+        f.spin *= 0.4;
+      }
+      // rest a moment on the floor, then tidy away
+      if (f.t > 2.5) {
+        f.mesh.scale.multiplyScalar(Math.max(0, 1 - dt * 6));
+        if (f.t > 3) {
+          this.root.remove(f.mesh);
+          this.falling.splice(i, 1);
+        }
+      }
+    }
+  }
+
   private groundY(): number {
     if (this.vehicle) {
       const w = this.vehicle.def.wheels[0];
@@ -364,19 +418,12 @@ export class MachineView {
   private syncWheel(vis: SlotVis, v: Vehicle | null, dt: number): void {
     const wv = vis.wheel!;
     const def = vis.def;
-    if (v && wv.index >= 0 && !v.pinned) {
-      const wd = v.def.wheels[wv.index];
-      const st = v.wheels[wv.index];
-      wv.pivot.position.set(wd.pos.x, wd.pos.y + st.hub, wd.pos.z);
-      wv.pivot.rotation.y = st.steer;
-      wv.spin.rotation.x = -(st.spin + this.spinBase);
-    } else {
-      // Pinned: the hub sits at its slot; jacked wheels droop a touch.
-      wv.pivot.position.set(def.pos.x, def.pos.y, def.pos.z);
-      if (v && def.lift && this.machine.jackRaised(def.lift)) wv.pivot.position.y -= 0.05;
-      wv.pivot.rotation.y = 0;
-      wv.spin.rotation.x = -this.spinBase;
-    }
+    // The sim owns where the hub is (Machine.hubPose); draw it there.
+    const hp = this.machine.hubPose.get(def.id);
+    wv.pivot.position.set(def.pos.x, def.pos.y + (hp?.dy ?? 0), def.pos.z);
+    wv.pivot.rotation.y = hp?.steer ?? 0;
+    const st = v && wv.index >= 0 ? v.wheels[wv.index] : null;
+    wv.spin.rotation.x = -((st && !v!.pinned ? st.spin : 0) + this.spinBase);
     const it = vis.item;
     const bad = vis.cond.startsWith('bad');
     const target = it !== null && bad && !(def.lift && this.machine.jackRaised(def.lift)) ? 0.84 : 1;
@@ -401,7 +448,7 @@ export class MachineView {
         return v?.obj ?? v?.wheel?.pivot ?? v?.group ?? null;
       }
       case 'cover':
-        return this.model?.hood ?? null;
+        return this.model?.hood ?? this.root.getObjectByName(`cover:${id}`) ?? null;
       case 'term': {
         const [tid, which] = id.split('.');
         const c = this.clamps.get(tid);

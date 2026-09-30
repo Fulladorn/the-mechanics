@@ -97,6 +97,12 @@ export interface BeatDef {
   detail?: string | ((w: World) => string | null);
   /** Waypoint; null hides it. */
   marker?: (w: World) => Vec3 | null;
+  /**
+   * The exact interactables (ids) that advance this beat right now — what the
+   * hint glow lights up. Omit to use whatever is interactable at the marker;
+   * return [] for "nothing to click yet" (e.g. walk somewhere).
+   */
+  targets?: (w: World) => string[] | null;
   start?: (w: World) => void;
   done: (w: World) => boolean;
   finish?: (w: World) => void;
@@ -175,6 +181,8 @@ export interface LevelDef {
   par: number;
   /** No fail states (the tutorial). */
   safe?: boolean;
+  /** Hint glow on the next target: always (tutorial) or after a while stuck (missions, default). */
+  guidance?: 'always' | 'delayed';
   /** Intro/outro cinematic ids the client knows how to play. */
   intro?: string;
   outro?: string;

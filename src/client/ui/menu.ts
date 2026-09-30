@@ -224,6 +224,10 @@ export class Menu {
       s.accessibility.colorblind = v;
       this.changed();
     });
+    this.segmented(body, 'Next-step glow', ['auto', 'always', 'off'], s.accessibility.guidance, (v) => {
+      s.accessibility.guidance = v as Settings['accessibility']['guidance'];
+      this.changed();
+    });
     this.toggle(body, 'Wider torque band', s.accessibility.torqueAssist, (v) => {
       s.accessibility.torqueAssist = v;
       this.changed();

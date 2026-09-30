@@ -205,7 +205,7 @@ function failed(g: Game): void {
   document.exitPointerLock?.();
   hud.show(false);
   lastCheckpoint = g.world.checkpoint;
-  shell.failed(g.world.failReason ?? 'downed', !!lastCheckpoint);
+  shell.failed(g.world.failReason ?? 'downed', !!lastCheckpoint, g.world.lastHurtBy);
 }
 
 function pause(): void {
@@ -324,6 +324,12 @@ function installDebug(): void {
       input.pitch = Math.atan2(y - e.y, Math.hypot(x - e.x, z - e.z));
     },
     focus: () => game?.world.focus?.label ?? null,
+    /** Drawn-vs-clickable audit of everything in reach (see View.auditTargets). */
+    auditTargets: () => game?.view.auditTargets() ?? [],
+    /** Headless browsers never grant pointer lock; pretend it's held so real mouse buttons reach the game. */
+    lock: () => {
+      input.locked = true;
+    },
     look: (yaw: number, pitch = 0) => {
       input.yaw = yaw;
       input.pitch = pitch;
@@ -368,6 +374,23 @@ function installDebug(): void {
   };
   (window as unknown as { __mech: typeof bridge }).__mech = bridge;
 }
+
+// Browser shortcuts vs. the game. Ctrl+W / Ctrl+Q can't be cancelled by a
+// page, so while you're in a job the browser asks before leaving instead of
+// silently throwing your run away. (Skipped under automation, where a
+// dialog would stall the test harness.)
+window.addEventListener('beforeunload', (e) => {
+  if (!game || !playing || navigator.webdriver) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+// In real fullscreen, Chromium lets a page capture system shortcuts too.
+document.addEventListener('fullscreenchange', () => {
+  const kb = (navigator as Navigator & { keyboard?: { lock?: (keys?: string[]) => Promise<void>; unlock?: () => void } }).keyboard;
+  if (!kb?.lock) return;
+  if (document.fullscreenElement) kb.lock().catch(() => undefined);
+  else kb.unlock?.();
+});
 
 boot().catch((e) => {
   console.error(e);

@@ -5,7 +5,7 @@ import type { FailReason, SimEvent } from './events';
 import { DEFAULT_HAZARDS, applyDamage, fallDamage, heal, makeVitals, stepHazards, type HazardDef, type Vitals } from './hazards';
 import { INTERACT_REACH, pickFocus, type Interactable } from './interact';
 import { ITEM_DEFS, ItemManager, itemLabel, type ItemKind, type ItemSpawn, type WorldItem } from './items';
-import { Machine, type MachineCtx } from './machine';
+import { Machine, type MachineCtx, type Step } from './machine';
 import { G, Physics, RAPIER, initRapier, type RCollider } from './physics';
 import { BELT_SLOTS, Player } from './player';
 import { Terrain } from './terrain';
@@ -116,6 +116,8 @@ export class World {
   private triggersFired = new Set<string>();
   ended: 'won' | 'failed' | null = null;
   failReason: FailReason | null = null;
+  /** What last hurt you ('wolf', 'fall', 'crash', 'cold'...), so a fail screen can say what to do differently. */
+  lastHurtBy: string | null = null;
   damageTaken = 0;
 
   /** What the crosshair is on (recomputed every step). */
@@ -308,14 +310,14 @@ export class World {
   }
 
   /** Nearest loose item of a kind (optionally only good ones). */
-  nearestItem(kind: ItemKind, good = true): WorldItem | undefined {
+  nearestItem(kind: ItemKind, good = true, emptyOk = false): WorldItem | undefined {
     const p = this.playerPos();
     let best: WorldItem | undefined;
     let bd = Infinity;
     for (const it of this.items.list) {
       if (it.kind !== kind || !this.items.visible(it)) continue;
       if (good && it.cond !== 'good') continue;
-      if (ITEM_DEFS[kind].fluid && it.fill < 0.05) continue;
+      if (ITEM_DEFS[kind].fluid && it.fill < 0.05 && !emptyOk) continue;
       const d = Math.hypot(it.pos.x - p.x, it.pos.z - p.z);
       if (d < bd) {
         bd = d;
@@ -446,6 +448,7 @@ export class World {
     const r = applyDamage(this.vitals, amount);
     if (r.damage <= 0) return;
     this.damageTaken += r.damage;
+    this.lastHurtBy = cause;
     this.events.push({ t: 'damage', amount: r.damage, cause });
     if (r.wentDown) this.fail('downed');
   }
@@ -464,6 +467,109 @@ export class World {
   }
 
   // --- the crosshair ----------------------------------------------------------------
+
+  /**
+   * What the current step wants you to use, among the things in reach: the
+   * beat's targets, or failing that whatever sits at its marker. Drives the
+   * hint glow, and the guidance tests walk the game using only this.
+   */
+  guide(): Interactable[] {
+    const b = this.currentBeat();
+    if (!b) return [];
+    const cands = this.lastCands;
+    const ids = b.targets?.(this);
+    if (ids) {
+      const set = new Set(ids);
+      return cands.filter((c) => set.has(c.id));
+    }
+    if (ids !== undefined) return []; // explicit null: nothing to highlight
+    const mk = this.marker();
+    if (!mk) return [];
+    return cands.filter((c) => (c.priority ?? 0) >= 0 && Math.hypot(c.pos.x - mk.x, c.pos.y - mk.y, c.pos.z - mk.z) < 0.35);
+  }
+
+  private lastCands: Interactable[] = [];
+
+  /** Everything the crosshair could act on from where you stand (tools and audits). */
+  nearbyInteractables(): readonly Interactable[] {
+    return this.lastCands;
+  }
+
+  /** Where a (good) item of this kind is, from the player's point of view. */
+  whereIs(kind: ItemKind, good = true, emptyOk = false): { at: 'hands' | 'belt' | 'rack' | 'world' | 'none'; vehicle?: string; item?: WorldItem } {
+    const p = this.player;
+    const ok = (it: WorldItem | undefined) => !!it && it.kind === kind && (!good || it.cond === 'good');
+    const held = this.items.get(p.held);
+    if (ok(held)) return { at: 'hands', item: held };
+    const belt = p.belt.map((id) => this.items.get(id)).find(ok);
+    if (belt) return { at: 'belt', item: belt };
+    for (const v of this.vehicles.values()) {
+      const r = v.rack.map((id) => this.items.get(id)).find(ok);
+      if (r) return { at: 'rack', vehicle: v.key, item: r };
+    }
+    const it = this.nearestItem(kind, good, emptyOk);
+    return it ? { at: 'world', item: it } : { at: 'none' };
+  }
+
+  /**
+   * The step as the player should hear it: if it needs an item and your
+   * hands hold something else, first deal with what you're holding — strap
+   * it to a nearby rack, or put it down.
+   */
+  handsFor(step: Step | null): Step | null {
+    if (!step?.need || step.targets.length) return step;
+    const held = this.heldItem();
+    if (!held || (held.kind === step.need && held.cond === 'good')) return step;
+    const what = itemLabel(held).toLowerCase();
+    const rack = this.worthKeeping(held) ? this.stowRack() : null;
+    if (rack)
+      return { text: `Strap the ${what} to the ${rack.def.name ?? 'rack'} (E at the rack) — then: ${step.text.toLowerCase()}`, pos: rack.world(rack.def.rack!), targets: [`vehicle:${rack.key}:rack`] };
+    return { text: `Put the ${what} down (G) — then: ${step.text.toLowerCase()}`, pos: step.pos, targets: [] };
+  }
+
+  /** A machine step's targets; for "go and get X": X lying about, or the rack it's strapped to. */
+  targetsFor(step: Step | null): string[] | null {
+    step = this.handsFor(step);
+    if (!step) return null;
+    if (step.targets.length) return step.targets;
+    if (!step.need) return [];
+    const w = this.whereIs(step.need);
+    if (w.at === 'rack') return [`vehicle:${w.vehicle}:unrack:${w.item!.id}`];
+    if (w.at === 'world') return [`item:${w.item!.id}`];
+    return [];
+  }
+
+  /** Is this worth strapping on and carrying around? Good parts yes; scrap and used tools no. */
+  worthKeeping(it: WorldItem): boolean {
+    return it.cond === 'good' && it.kind !== 'jack' && it.kind !== 'chock';
+  }
+
+  /** The nearest rack with room within `range` m (to stow what's in your hands), or null. */
+  stowRack(range = 30): Vehicle | null {
+    const p = this.playerPos();
+    let best: Vehicle | null = null;
+    let bd = range;
+    for (const v of this.vehicles.values()) {
+      if (!v.def.rack || v.rack.length >= RACK_MAX) continue;
+      const d = Math.hypot(v.pos.x - p.x, v.pos.z - p.z);
+      if (d < bd) {
+        bd = d;
+        best = v;
+      }
+    }
+    return best;
+  }
+
+  /** Waypoint for a machine step: the part to fetch (or its rack), else where to work. */
+  markerFor(step: Step | null): Vec3 | null {
+    step = this.handsFor(step);
+    if (!step) return null;
+    if (step.need && !step.targets.length) {
+      const w = this.whereIs(step.need);
+      if (w.at === 'rack' || w.at === 'world') return w.item!.pos;
+    }
+    return step.pos ?? null;
+  }
 
   private candidates(): Interactable[] {
     const out: Interactable[] = [];
@@ -596,20 +702,27 @@ export class World {
           },
         });
       } else if (top) {
-        out.push({
-          id: `vehicle:${v.key}:unrack`,
-          pos: rp,
-          r: 0.55,
-          label: `Take the ${itemLabel(top).toLowerCase()} off the rack`,
-          verb: 'tap',
-          priority: 0,
-          target: `vehicle:${v.key}:rack`,
-          run: () => {
-            v.rack.pop();
-            top.state = 'world';
-            this.giveHands(top);
-          },
-        });
+        // It's a flat rack, not a stack: look at the part you want and take
+        // it. Each strapped part is its own target, where it's drawn.
+        for (const id of v.rack) {
+          const it = this.items.get(id);
+          if (!it) continue;
+          const sh = ITEM_DEFS[it.kind].shape;
+          out.push({
+            id: `vehicle:${v.key}:unrack:${it.id}`,
+            pos: it.pos,
+            r: (sh.t === 'box' ? Math.max(sh.hx, sh.hy, sh.hz) : sh.r) + 0.04,
+            label: `Take the ${itemLabel(it).toLowerCase()} off the rack`,
+            verb: 'tap',
+            priority: 1,
+            target: `item:${it.id}`,
+            run: () => {
+              v.rack.splice(v.rack.indexOf(it.id), 1);
+              it.state = 'world';
+              this.giveHands(it);
+            },
+          });
+        }
       }
     }
   }
@@ -866,15 +979,36 @@ export class World {
     const eye = p.eye();
     const dir = p.look();
     const cands = this.candidates();
-    this.focus = pickFocus({ origin: eye, dir }, cands, INTERACT_REACH, (c, dist) => {
+    this.lastCands = cands;
+    const prev = this.focus;
+    const next = pickFocus({ origin: eye, dir }, cands, INTERACT_REACH, (c, dist) => {
       // Walls and terrain block the crosshair; the thing itself doesn't.
       const hit = this.phys.castRay(eye, dir, dist, G.STATIC | G.DOOR);
       // For boxes `dist` is where the ray enters the face; for spheres allow
       // for the radius (the collider may wrap the thing itself).
-      if (!hit || hit.toi > dist - (c.box ? 0.02 : c.r) - 0.05) return false;
+      if (!hit || hit.toi > dist - (c.box ? (c.box.slack ?? 0.02) : c.r) - 0.05) return false;
       const owner = hit.tag?.owner ?? '';
       return !(c.target && owner && c.target.startsWith(owner));
     });
+    // Mid-hold on a nut, stay locked to it while the crosshair is still
+    // roughly on it: a little wobble onto the neighbouring nut shouldn't
+    // throw away the progress you've built up.
+    const busy = prev && (this.holdId === 'u:' + prev.id || this.torquing?.id === prev.id);
+    if (busy && next?.id !== prev.id) {
+      const same = cands.find((c) => c.id === prev.id);
+      if (same) {
+        const dx = same.pos.x - eye.x;
+        const dy = same.pos.y - eye.y;
+        const dz = same.pos.z - eye.z;
+        const t = dx * dir.x + dy * dir.y + dz * dir.z;
+        const off = Math.hypot(dx - dir.x * t, dy - dir.y * t, dz - dir.z * t);
+        if (t > 0 && t < INTERACT_REACH + 0.3 && off < 0.11) {
+          this.focus = same;
+          return;
+        }
+      }
+    }
+    this.focus = next;
   }
 
   private handleInteract(intent: Intent, pressedE: boolean, dt: number): void {

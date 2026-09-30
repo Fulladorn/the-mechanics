@@ -153,6 +153,37 @@ export class Hud {
     }
   }
 
+  /**
+   * The prompt sits a little below the crosshair (clear of the part you're
+   * working on) but never under the Dispatch subtitle or the carry line: it
+   * rides up above whichever of them is showing.
+   */
+  private placePrompt(): void {
+    const want = innerHeight / 2 + 70;
+    let floor = innerHeight;
+    for (const el of [this.radio, this.carry]) {
+      if (!el.classList.contains('show')) continue;
+      floor = Math.min(floor, el.getBoundingClientRect().top);
+    }
+    const h = this.prompt.offsetHeight || 40;
+    const below = Math.min(want, floor - h - 10);
+    // no room under the crosshair (a long line on a short screen): flip above it
+    const top = below >= innerHeight / 2 + 24 ? below : innerHeight / 2 - 28 - h;
+    this.set('promptTop', String(Math.round(top)), () => (this.prompt.style.top = `${Math.round(top)}px`));
+  }
+
+  /** A live line under the puzzle help: how close you are. */
+  panelProgress(text: string): void {
+    let el = this.panelHelp.querySelector('.progress') as HTMLElement | null;
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'progress';
+      el.style.cssText = 'margin-top:8px;font:700 15px var(--display);color:var(--orange);letter-spacing:0.5px';
+      this.panelHelp.appendChild(el);
+    }
+    this.set('panelProg', text, () => (el!.textContent = text));
+  }
+
   // --- per frame ----------------------------------------------------------------------
 
   update(w: World, c: HudCtx, dt: number, jobSheet: () => string): void {
@@ -210,6 +241,7 @@ export class Hud {
       });
       this.prompt.classList.toggle('disabled', !!f.disabled);
       this.prompt.classList.add('show');
+      this.placePrompt();
     } else {
       this.prompt.classList.remove('show');
     }
@@ -229,10 +261,14 @@ export class Hud {
     this.set('clk', `${hh}:${mm}`, () => (this.objClock.textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`));
 
     // waypoint
-    const mk = c.cinematic || c.panel ? null : w.marker();
+    // Once you're aiming at what the step wants, the waypoint has done its job
+    // (and would sit right on top of the prompt).
+    const onIt = !!w.focus && w.guide().some((g) => g.id === w.focus!.id);
+    const mk = c.cinematic || c.panel || onIt ? null : w.marker();
     if (mk) {
-      const s = c.project({ x: mk.x, y: mk.y + 0.6, z: mk.z });
       const d = Math.hypot(mk.x - c.camPos.x, mk.y - c.camPos.y, mk.z - c.camPos.z);
+      // Float above far targets (a building); sit on near ones (a lug nut).
+      const s = c.project({ x: mk.x, y: mk.y + Math.min(0.6, d * 0.08), z: mk.z });
       const m = 60;
       let x = s.x;
       let y = s.y;

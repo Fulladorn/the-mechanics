@@ -51,7 +51,7 @@ describe('tutorial: orientation day', () => {
     const hub = m.world(slot.pos);
     const tyre = m.world({ x: slot.pos.x - 0.08, y: slot.pos.y + 0.27, z: slot.pos.z + 0.1 });
     bot.approach(hub, 1.2, outside(hub));
-    for (const b of slot.bolts!) bot.loosenAt(m.world(b.pos));
+    slot.bolts!.forEach((_, i) => bot.loosenAt(m.boltPos(slot.id, i)));
     const jackItem = w.items.list.find((i) => i.kind === 'jack')!;
     bot.approach(jackItem.pos, 1.1);
     bot.tapAt(jackItem.pos, /Pick up Trolley Jack/);
@@ -69,7 +69,7 @@ describe('tutorial: orientation day', () => {
     bot.tapAt(spare.pos, /Pick up Wheel/);
     bot.approach(hub, 1.2, outside(hub));
     bot.tapAt(tyre, /Fit the wheel/);
-    for (const b of slot.bolts!) bot.torqueAt(m.world(b.pos));
+    slot.bolts!.forEach((_, i) => bot.torqueAt(m.boltPos(slot.id, i)));
     bot.approach(jp, 1.1, outside(jp));
     bot.holdAt(jp, 1.2, /Lower the jack/);
     bot.tapAt(jp, /Pull the jack out/);
@@ -92,7 +92,7 @@ describe('tutorial: orientation day', () => {
     bot.tapAt(neg, /Unclip the black/);
     bot.tapAt(pos, /Unclip the red/);
     const bslot = m.comp<SlotDef>('battery');
-    bot.loosenAt(m.world(bslot.bolts![0].pos));
+    bot.loosenAt(m.boltPos(bslot.id, 0));
     const battTop = m.world({ x: bslot.pos.x, y: bslot.pos.y + 0.05, z: bslot.pos.z + 0.05 });
     bot.tapAt(battTop, /Take off the dead battery/);
     bot.tick(1, { drop: true });
@@ -102,7 +102,7 @@ describe('tutorial: orientation day', () => {
     bot.tapAt(fresh.pos, /Pick up Battery/);
     bot.approach(neg, 0.8, frontStand);
     bot.tapAt(battTop, /Fit the battery/);
-    bot.torqueAt(m.world(bslot.bolts![0].pos));
+    bot.torqueAt(m.boltPos(bslot.id, 0));
     bot.tapAt(pos, /Clip on the red/);
     bot.tapAt(neg, /Clip on the black/);
     expect(bot.events('zap').length).toBe(0);

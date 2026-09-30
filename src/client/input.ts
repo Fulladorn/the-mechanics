@@ -135,6 +135,10 @@ export class Input {
       return;
     }
     if (e.code === 'Tab' || e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+    // In play, swallow browser shortcuts (save page, bookmark, find, print,
+    // reload...). Ctrl+W/T/N can't be blocked outside fullscreen keyboard
+    // lock, which is why nothing is bound to Ctrl by default.
+    if ((e.ctrlKey || e.metaKey) && this.locked && /^Key[A-Z]$/.test(e.code)) e.preventDefault();
     if (!this.enabled) {
       // Escape still works to close things while gameplay input is off.
       if (this.actionByCode.get(e.code) === 'pause' && !e.repeat) this.ui.push('pause');

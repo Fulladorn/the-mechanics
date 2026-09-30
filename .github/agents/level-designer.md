@@ -1,124 +1,65 @@
 ---
 agent: level-designer
 display_name: "Level Designer Agent"
-description: "Author mission LevelDef content and ensure design rules."
+description: "Design and build missions: layout, beats, machines, props, guidance."
 ---
 
-# Level Designer Agent — The Mechanics
+# Level Designer Agent: The Mechanics
 
-You are the **Level Designer** for *The Mechanics*. You author the TypeScript
-content files that define missions: terrain, part placements, enemy spawns,
-environmental puzzles, cutscene scripts, and lore items.
+You design and build missions. Read these first:
+- [AGENTS.md](../../AGENTS.md);
+- [docs/GAME_DESIGN.md](../../docs/GAME_DESIGN.md) (pillars §1, levels §5);
+- §4–5 of [docs/TECH_ARCHITECTURE.md](../../docs/TECH_ARCHITECTURE.md).
 
----
+## How a level is built
+- **The factory.**
+  - A level is a factory, `make<Name>(): LevelDef`, in
+    `src/content/levels/<name>.ts`.
+  - Register it in `src/content/levels/index.ts` (`LEVELS`). It's then
+    playable at `?level=<id>`.
+  - Add it to `CAMPAIGN` in `src/client/progress.ts`.
+- **`LevelDef`** (in `src/content/levels/types.ts`):
+  - `terrain`: an authored heightfield with roads, pads and features; see
+    `ridgeTerrain.ts`;
+  - `ground` colour rules (with `feather`), `nature` scatter;
+  - `statics` (colliders), `props` (art by name);
+  - `items`, `machines`, `stations`, `doors`, `wolves`, `spawn`;
+  - `beats`, `side`, `triggers`, `hazards`, `warmth`, `lore`;
+  - `par`, `safe`, `guidance`, `intro` / `outro` / `briefing`.
+- **Buildings and furniture:** use `Kit` / `furnish()` (`src/content/kit.ts`)
+  so each collider and its drawn prop come from the same numbers.
+- **Machines:**
+  - Define them in `src/content/vehicles/`. Reuse `lugNuts` / `wheelSlot`
+    from `common.ts`.
+  - Donors are machines too, and salvage steps are generated for them.
+- **New prop art:** add a builder under `src/client/render/kit/` and
+  register it in `kit/registry.ts`. If the player uses it, return a
+  `targets` map so it can glow.
 
-## Always-loaded context
+## Every beat needs
+- `text` (the objective card), and `detail` when helpful;
+- `marker(w)`: the waypoint, on the thing to use;
+- `targets(w)`: the exact interactable ids that advance it. Return `[]`
+  when the player just has to walk somewhere;
+- `done(w)`;
+- `hints` (timed Dispatch lines);
+- `checkpoint: true` + `restore(w)` at the end of each stretch where a
+  failure would hurt.
 
-Before authoring any level content, read:
-- `docs/GAME_DESIGN.md` §4 (Levels) and §5 (Narrative/Lore) — the design spec
-  for each biome and their unique mechanics
-- `docs/ROADMAP.md` — the acceptance criteria for the phase this level belongs to
-- `src/shared/` types and constants — to use correct IDs, enums, and config shapes
-- `content/levels/` — any existing level files for patterns to follow
-- The issue you were assigned
+## Rules
+- **Depth stays, and clarity is our job.** Don't cut steps. Make each one
+  say what, where and how.
+- **Anything you can use is drawn where it's clicked.**
+- **Every stretch has a recovery.** Hazards are telegraphed, failures name
+  their cause, and checkpoints are close.
+- **Travel beats** (issue class #10, still open) need a waypoint along the
+  road and an arrival radius that matches what's shown.
 
----
-
-## Level file structure
-
-Level content files live in `content/levels/<name>.ts` and export a `LevelDef`
-object. Follow the exact shape defined in `src/shared/` types. Do not invent
-new top-level fields — if you need one, open an issue for `@coder` to add it
-to the type first.
-
-A complete level file covers:
-
-```
-LevelDef {
-  id, name, biome
-  terrain            // procedural config or asset reference
-  spawnPoints        // player insert positions
-  vehicle            // which vehicle + initial damage state
-  parts[]            // scavengeable parts with positions + variants
-  tools[]            // tool spawns
-  hazards            // biome hazard config (cold/wet/oxygen)
-  enemies[]          // spawn waves with patrol paths
-  environmentalPuzzles[]  // puzzle triggers, required tools, unlock effects
-  loreCrates[]       // lore item positions + log IDs
-  exfil              // trigger volume + win condition
-  cutscenes          // insert + extract script references
-  dispatch[]         // VO cue scripts (placeholder TTS text)
-  checkpoints[]      // save/narrative trigger positions
-}
-```
-
----
-
-## Design rules (from GAME_DESIGN.md)
-
-- **Every level must be soloable.** Co-op hero steps need a slower solo
-  substitute (listed in the relevant `environmentalPuzzle` entry).
-- **Parts must be findable by exploration, not by luck.** Place parts in
-  memorable, narratively logical spots (a wheel near the wrecked trailer,
-  an engine block in the cave behind the locked door).
-- **Hazards create pressure, not walls.** The player should always have a
-  recovery path (a fire to warm up, a tank to refill oxygen, a medkit on
-  the route).
-- **Lore crates reward curiosity.** Place them off the critical path but
-  reachable without special tools.
-- **Enemy spawns must be telegraphed.** Use audio/visual cues before
-  enemies aggress. Never spawn an enemy directly on a player.
-- **The exfil trigger must be visible from the vehicle** once the drive
-  phase starts — no hidden goals.
-
----
-
-## Biome-specific notes
-
-### Mountains (Phase 7)
-- Cold exposure hazard — place fires/shelters on the critical path
-- Switchback terrain for the drive phase (tests vehicle handling)
-- Wolf enemy (telegraph → dodge/block → strike)
-- Winch puzzle at the cave entrance (co-op: one holds tension, one climbs;
-  solo: anchor + timed climb)
-- Lore log 1: found in the cave after the winch puzzle
-
-### Ocean (Phase 8)
-- Whirlpool pull force + rising-water hull race
-- Swim traversal between debris islands
-- Shark enemy (defensive, harpoon weapon)
-- Mast hero-lift co-op step (solo: block-and-tackle rig)
-- Lore log 2: in the submerged salvage hold
-
-### Moon (Phase 9)
-- Oxygen economy + low-gravity movement (bunny-hop supercharged)
-- Airlock egress (co-op: inner/outer door; solo: override sequence)
-- Construct enemy bearing mystery symbol (shielded combat puzzle)
-- Buried structure with final lore log + sequel hook
-- Low-grav drive to launch pad
-
----
-
-## Workflow
-
-1. Read the issue and the relevant GAME_DESIGN.md section for the biome.
-2. Read the `LevelDef` type and any existing level files.
-3. Author the level file in `content/levels/<name>.ts`.
-4. Verify it compiles: `npm run typecheck`
-5. Write or update the headless tour stub in `test/tours/` to assert:
-   - All critical parts are reachable
-   - The exfil trigger is reachable from the vehicle start
-   - The environmental puzzle is solvable
-6. Open a PR: `[Phase X][Level] Author <LevelName> content file`.
-
----
-
-## Constraints
-
-- **TypeScript only** — no JSON level files. The type system is our spec checker.
-- **No hardcoded player positions** — use `spawnPoints[]` and let the server
-  assign them.
-- **Dispatch VO text** can be placeholder TTS-friendly prose — it will be
-  replaced by real VO in Phase 11. Write it as you'd want an actor to read it.
-- **Stay within the design spec.** If you want to add a new mechanic not in
-  GAME_DESIGN.md, open a design question issue for human review first.
+## Done means
+- [ ] `test/guidance.spec.ts` covers the level. Add a case, with `stand`
+  entries for driving beats.
+- [ ] A playthrough spec reaches the win and restores from every
+  checkpoint.
+- [ ] `node tools/targetcheck.mjs <level>` is clean.
+- [ ] You've reviewed the `node tools/walkthrough.mjs <level>` screenshots.
+- [ ] The beat list is added to `docs/GAME_DESIGN.md` §5.

@@ -1,348 +1,347 @@
-# The Mechanics — Technical Architecture
+# The Mechanics: Technical Architecture
 
-**Version:** 1.0 (planning)
-**Companion docs:** [`GAME_DESIGN.md`](GAME_DESIGN.md) (what) · [`ROADMAP.md`](ROADMAP.md) (build order)
+This describes the code as it is. For commands and project rules, see
+[AGENTS.md](../AGENTS.md). For the design, see
+[GAME_DESIGN.md](GAME_DESIGN.md).
 
----
+## 1. Shape of the thing
 
-## 1. Guiding principles
-
-1. **One deterministic sim, three hosts.** A single DOM-free `src/sim/` core is
-   the source of truth. It runs identically on the **client** (prediction +
-   offline), the **server** (authority), and **headless** (tests/CI/automation).
-   This is the single most important architectural decision — it's what made the
-   reference project (`world-of-claudecraft`) tractable to build *and* verify, and
-   it's what keeps co-op fair and debuggable.
-2. **Server-authoritative.** The server simulates; clients send **input intent**
-   and render **snapshots**. No client is trusted with game state. Small player
-   counts (1–4, up to 8) make full authority cheap.
-3. **Web-native, zero-install.** TypeScript + Vite + Three.js. Players click a
-   URL. Streamers share a link and a join code. No launchers.
-4. **Procedural-first content, data-driven levels.** Build art in code; describe
-   levels as data. Fewer binary assets = faster iteration + smaller repo.
-5. **Verifiable by construction.** Determinism + headless sim + screenshot tours
-   mean an agent (or human) can change code and *prove* it still works.
-
----
-
-## 2. Stack
-
-| Layer | Choice | Why |
-|---|---|---|
-| Language | **TypeScript** (strict) | One language across sim/client/server; safety |
-| Client build | **Vite** (dev :5173, hot reload) | Fast HMR; `esbuild` prod bundles |
-| Rendering | **Three.js** (WebGL2) | Proven web 3D; matches reference |
-| Post-FX | **postprocessing** + **n8ao** | Cheap AO + bloom for the cartoony pop |
-| **Physics** | **Rapier3D** (`@dimforge/rapier3d-compat`, WASM) | Fast, **deterministic** (fixed-step, same build), rigid bodies + character controller + vehicle. The key addition over the reference, which had no physics. |
-| Server | **Node.js** (bundled to CJS via esbuild) | Same lang; runs Rapier WASM headless |
-| Transport (state) | **`ws`** WebSockets | Low-latency binary snapshots; reference-proven |
-| Transport (voice) | **WebRTC** (mesh, ≤8) | P2P spatial voice; server only signals |
-| Persistence | **Postgres 16** (JSONB), `pg` | Profiles/unlocks; reference-proven. Dev fallback: SQLite/JSON behind a `Store` iface |
-| Profanity | **`obscenity`** | Name/chat filtering |
-| Asset pipeline | **`@gltf-transform/cli`** | Optimize curated glTF hero props/HDRIs |
-| Unit tests | **vitest** | Sim logic, puzzles, vehicle FSM, movement |
-| E2E / tours | **puppeteer-core** | Headless multi-client + screenshot diffs |
-| Orchestration | **Docker + Compose** | client + server + postgres, one command |
-
-**Why Rapier over cannon-es/ammo:** Rust→WASM performance, an actively
-maintained API, a built-in **kinematic character controller** and **raycast
-vehicle**, and — critically — **cross-platform determinism** when every host runs
-the *same* WASM build with a *fixed* timestep and the *same* operation order.
-That determinism is what lets client prediction reconcile cleanly against the
-server and what makes headless tests meaningful.
-
----
-
-## 3. System architecture
+- It's a single-player browser game and a client-only app: no server, no
+  netcode, no accounts. Vite builds it to static files, and GitHub Pages
+  hosts it.
+- It has three layers, and dependencies only point downward:
 
 ```
-                         ┌──────────────────────────────────────┐
-                         │        src/shared/  (pure TS)         │
-                         │  protocol msgs · types · constants ·  │
-                         │  fixed-point/seeded math · ids        │
-                         └───────────────┬──────────────────────┘
-                                         │ imported by all
-        ┌────────────────────────────────┼────────────────────────────────┐
-        ▼                                 ▼                                 ▼
-┌───────────────┐               ┌───────────────────┐             ┌──────────────────┐
-│  src/client/  │   WebSocket   │    src/server/    │   pg        │   Postgres 16    │
-│               │  intent ▲     │                   │────────────▶│  profiles JSONB  │
-│ Three.js view │  ───────┼──── │ lobby + sessions  │             └──────────────────┘
-│ input→intent  │  snapshot▼    │ authoritative loop│
-│ prediction    │◀───────────── │  (fixed 30 Hz)    │
-│ interpolation │   WebRTC      │                   │
-│ UI/HUD/puzzle │  signaling    │  ┌──────────────┐ │
-│ audio + voice │◀────────────▶ │  │  src/sim/    │ │   ← SAME module runs here
-└──────┬────────┘  (P2P voice   └──┤ deterministic├─┘     and inside the client
-       │            mesh, peers)    │ + Rapier WASM│
-       │                            └──────┬───────┘
-       └── runs the SAME src/sim/ ─────────┘
-           for offline + prediction         ▲
-                                            │ also invoked by
-                                   ┌────────┴─────────┐
-                                   │   headless/      │  tests · CI · automation
-                                   │  env_server.ts   │  (no renderer, no sockets)
-                                   └──────────────────┘
+src/client/   DOM, three.js, audio, input, HUD            ← reads sim state, sends intents/commands
+    │
+src/content/  level + vehicle definitions (pure data + small functions)
+    │
+src/sim/      the game rules: physics, player, items, machines, vehicles, wolves, beats
+    │
+src/shared/   constants, math, seeded RNG, timer
 ```
 
-### 3.1 `src/shared/`
-Pure, dependency-light TypeScript imported everywhere: wire **protocol** message
-types + (de)serializers, shared **enums/types** (item ids, system ids, level ids),
-**constants** (tick rate, speeds, tolerances), **seeded RNG** and any fixed-point
-math helpers. No Three.js, no `ws`, no Node APIs.
+- **`src/sim/` never imports the DOM, three.js or `src/client/`.** It imports
+  only Rapier (in `physics.ts`). That's why tests can play whole levels in
+  node.
+- Content names its art by string (`model: 'betsy'`, `PropDef.kind: 'locker'`),
+  and the client resolves the strings.
 
-### 3.2 `src/sim/` — the deterministic core
-The whole game *as logic*, with **no DOM and no rendering**. Given an initial
-**seed + level definition** and a stream of per-tick **player intents**, it
-advances world state by a **fixed timestep** and produces **snapshots**. Same
-inputs ⇒ same outputs, everywhere.
-
-Modules:
-- `world.ts` — `World` aggregate: entities, players, items, vehicle, hazards, RNG,
-  `step(dtFixed, intents)`.
-- `physics.ts` — Rapier wrapper: world creation, fixed-step, body/collider
-  registry, deterministic insertion order, character controller, raycast vehicle.
-- `movement.ts` — kinematic FP controller incl. **bunny-hop/crouch-jump** model
-  (acceleration, air control, speed cap, biome modifiers) + stamina.
-- `interaction.ts` — raycast “what am I looking at”, pickup/drop/throw, install.
-- `inventory.ts` — 6-slot toolbelt + carried heavy-part state.
-- `vehicle.ts` — **assembly FSM** (systems `MISSING|BROKEN|GO`, `critical` set →
-  drivable) + driving dynamics + integrity/damage.
-- `puzzles/` — pure logic + seeding + win-check for each interface puzzle
-  (wire-match, bolt-torque, fuse-grid, valve-balance, alignment, fuel-mix).
-- `hazards.ts` — survival meters (HP/stamina/exposure: cold/breath/oxygen),
-  whirlpool pull, vacuum.
-- `combat.ts` — enemy AI (telegraph/dodge/block/strike), down/revive timer.
-- `events.ts` — domain events emitted for the client to turn into VFX/SFX/UI
-  (e.g. `SystemRepaired`, `PlayerDowned`, `PartPickedUp`) — keeps the sim mute but
-  expressive.
-- `index.ts` — public API: `createWorld(seed, levelDef)`, `step()`,
-  `snapshot()`, `applyCommand()`.
-
-**Determinism rules (enforced by lint/review):** no `Date.now()`/`Math.random()`
-in sim (use injected clock + seeded RNG); fixed iteration order over entities
-(arrays/sorted maps, never `Set`/`Map` insertion-dependent iteration of floats);
-fixed timestep accumulator; all randomness seeded from world seed; Rapier stepped
-at the fixed dt with stable body ordering.
-
-### 3.3 `src/client/`
-- `render/` — Three.js scene, `models.ts` (code rigs), `props.ts`, `textures.ts`
-  (procedural), `effects.ts` (post-FX), vehicle/biome scene builders.
-- `input/` — pointer-lock mouse + keybinds → **intent** (not state).
-- `net/` — `ws` client, **prediction** (run local intent through `sim` immediately),
-  **reconciliation** (replay unacked intents against server snapshot),
-  **interpolation/extrapolation** for remote players & dynamic bodies.
-- `ui/` — HUD, menus, lobby, **puzzle panels** (DOM/Canvas overlay), results.
-- `audio/` — positional SFX, music director, VO playback (+ Moon degrade filter).
-- `voice/` — WebRTC mesh; gain per peer driven by **sim distance** (proximity).
-- `main.ts` — boot, fixed world seed per mission, offline vs online switch.
-
-The client can run the sim **standalone** (offline/solo) — online mode just adds
-the server as the authority and the network as the transport.
-
-### 3.4 `src/server/`
-- `index.ts` — HTTP (REST: auth, lobby create/join, profile) + `ws` upgrade.
-- `lobby.ts` — lobbies keyed by **join code**; party membership; level select
-  (unlocked only); ready/start.
-- `session.ts` — one **authoritative game** per active mission: owns a `sim`
-  `World`, accumulates intents, **steps at fixed 30 Hz**, broadcasts snapshots.
-- `snapshot.ts` — snapshot assembly + **delta/quantization** (small player counts
-  → no interest management needed; whole-world deltas are fine).
-- `persistence/` — `Store` interface; `PgStore` (Postgres JSONB) + `MemoryStore`/
-  `JsonFileStore` for local dev. Saves **profile/unlocks** only (no mid-mission).
-- auth: scrypt-hashed passwords + bearer tokens (guests allowed; account optional
-  for cross-session unlocks).
-
-### 3.5 `headless/`
-`env_server.ts` runs missions with **no renderer and no sockets** — drive the sim
-with scripted/random intents for tests, balance sweeps, soak tests, and (à la
-reference) a possible RL-style env later. `npm run env` / `npm run bench`.
-
----
-
-## 4. Netcode model
-
-- **Tick:** fixed **30 Hz** server authority (33.3 ms). Client samples input each
-  frame, sends compact **intent** packets ~30 Hz.
-- **Intent, not state:** `{seq, dtTicks, move:{x,y}, look:{yaw,pitch}, buttons:bitmask, action?}`.
-- **Prediction:** client applies its own intent to its local `sim` immediately for
-  zero-latency feel.
-- **Reconciliation:** each snapshot carries the last-acked input `seq`; client
-  rewinds local player to authoritative state and **replays** unacked intents.
-- **Remote entities:** **interpolated** between snapshots (≈100 ms buffer);
-  dynamic physics props interpolated, with short extrapolation on packet loss.
-- **Snapshots:** authoritative entity transforms + game state, **quantized**
-  (pos/quat compressed) and **delta-encoded** vs the client's last ack.
-- **Why this is enough:** co-op vs PvE at ≤8 players is tiny; we trade bandwidth
-  for simplicity (full-world deltas, no AoI culling in v1).
-- **Determinism payoff:** because client and server run the *same* `sim`,
-  prediction/reconciliation rarely visibly corrects — the client is usually
-  already right.
-
-**Voice:** server is only the **signaling** broker; audio is **WebRTC P2P mesh**.
-Per-peer gain is set from in-sim distance/orientation → spatial **proximity chat**;
-push-to-talk/toggle just gates the local mic track.
-
----
-
-## 5. Data & persistence
-
-- **Profiles (Postgres JSONB):** `{ id, name, auth, unlocks:{levels, cosmetics},
-  settings, stats }`. Autosave on change + on disconnect; **no mission state** is
-  persisted (design: no mid-mission save).
-- **Level definitions are data, not rows:** `content/levels/*.ts` export typed
-  `LevelDef` (spawns, terrain ref, part/tool placements, puzzle seeds, hazard
-  zones, enemy spawns, exfil trigger, cutscene script). Loaded by the sim; trivial
-  to add/tune levels.
-- **Parts catalog** (`content/parts.ts`) and **narrative** (`content/narrative.ts`,
-  Dispatch VO + cutscene storyboards) are likewise data.
-
----
-
-## 6. Repository layout
-
-```
-the-mechanics/
-├── docs/                     # GAME_DESIGN, TECH_ARCHITECTURE, ROADMAP
-├── index.html                # Vite entry
-├── package.json
-├── tsconfig.json             # base (strict)
-├── tsconfig.server.json      # server/headless build
-├── vite.config.ts
-├── docker-compose.yml        # client + server + postgres
-├── Dockerfile.server
-├── src/
-│   ├── shared/               # protocol, types, constants, seeded math
-│   ├── sim/                  # deterministic core (+ physics.ts Rapier wrapper)
-│   │   └── puzzles/
-│   ├── client/
-│   │   ├── render/  input/  net/  ui/  audio/  voice/
-│   │   └── main.ts
-│   └── server/
-│       ├── persistence/
-│       └── index.ts  lobby.ts  session.ts  snapshot.ts
-├── content/
-│   ├── levels/               # garage, mountains, ocean, moon (LevelDef)
-│   ├── parts.ts  narrative.ts
-│   └── assets/               # curated glTF/HDRI (+ CREDITS.md), gitignored _raw/
-├── headless/
-│   └── env_server.ts
-├── test/                     # *.spec.ts (vitest) + tours
-└── tools/
-    ├── visual_tour.mjs       # single-client screenshot tour
-    └── mp_browser.mjs        # two real clients that see each other
-```
-
-## 7. Proposed `package.json` (scripts & key deps)
-
-> Versions are a starting proposal; pin exact versions at scaffold time
-> (Phase 0) after `npm install` resolves them.
-
-```jsonc
-{
-  "name": "the-mechanics",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "concurrently -k \"npm:dev:client\" \"npm:dev:server\"",
-    "dev:client": "vite",
-    "dev:server": "node --watch --import tsx src/server/index.ts",
-    "build": "npm run build:client && npm run build:server",
-    "build:client": "vite build",
-    "build:server": "esbuild src/server/index.ts --bundle --platform=node --format=cjs --outfile=dist/server.cjs",
-    "start": "node dist/server.cjs",
-    "env": "tsx headless/env_server.ts",
-    "bench": "tsx headless/env_server.ts --bench",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "tour": "node tools/visual_tour.mjs",
-    "tour:mp": "node tools/mp_browser.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint .",
-    "compose:up": "docker compose up --build"
-  },
-  "dependencies": {
-    "three": "^0.165.0",
-    "postprocessing": "^6",
-    "n8ao": "^1",
-    "@dimforge/rapier3d-compat": "^0.14",
-    "ws": "^8",
-    "pg": "^8",
-    "obscenity": "^0.4"
-  },
-  "devDependencies": {
-    "typescript": "^5",
-    "vite": "^5",
-    "esbuild": "^0.23",
-    "tsx": "^4",
-    "concurrently": "^9",
-    "vitest": "^2",
-    "puppeteer-core": "^23",
-    "@gltf-transform/cli": "^4",
-    "eslint": "^9"
-  }
-}
-```
-
-## 8. Local dev & deployment
-
-- **Dev:** `npm install && npm run dev` → Vite client (:5173) + watched server
-  (:8787). Open two tabs: host in one, paste the join code in the other. Postgres
-  optional in dev (defaults to `JsonFileStore`); set `DATABASE_URL` to use PG.
-- **Env vars:** `PORT` (8787), `DATABASE_URL`, `PUBLIC_WS_URL` (client→server),
-  `WORLD_SEED` (override fixed seed), `TICK_HZ` (default 30).
-- **Docker:** `docker compose up --build` brings up `postgres:16-alpine`, the
-  server, and the static client behind one entry. Server bundled to CJS via
-  esbuild; client built by Vite to static assets.
-- **Web execution note:** outbound network in this managed environment is governed
-  by the chosen network policy — `npm install`, Docker image pulls, and CDN-hosted
-  assets depend on it. Keep deps lean and asset fetches vendored where possible.
-
-## 9. Verification harness (the "prove it works" loop)
-
-This is first-class, not an afterthought — it's how we keep a large game stable.
-
-1. **vitest unit/sim suites** — deterministic and fast:
-   - movement: bunny-hop accel curve, speed cap, biome modifiers, stamina.
-   - vehicle FSM: state transitions, `critical`→drivable, integrity/damage.
-   - each **puzzle**: seeded generation is solvable; win-check correctness; failure
-     modes.
-   - hazards: cold/breath/oxygen drain & recovery; down/revive timer & wipe.
-   - combat: telegraph→dodge/block windows; co-op stagger math.
-   - **determinism test:** same seed + same intent log ⇒ identical snapshot hash
-     across two independent `sim` runs (guards the whole architecture).
-2. **Headless mission runs** (`headless/env_server.ts`) — scripted intents play a
-   mission start→exfil; assert win + no exceptions; soak/balance sweeps.
-3. **Puppeteer tours** — `visual_tour.mjs` boots the client, walks a route,
-   captures screenshots (smoke + visual diff). `mp_browser.mjs` launches **two
-   real browser clients** in one server, proves they see each other move and can
-   co-op a repair step.
-4. **CI / web SessionStart hook** — `npm ci && npm run typecheck && npm test`
-   (+ a smoke tour) on every change so web sessions start from a known-green base.
-   (See the `session-start-hook` skill.)
-
-## 10. Performance budget (targets)
-
-- 60 fps on a mid laptop iGPU at 1080p; graceful resolution-scale down.
-- Draw calls minimized via merged static geometry per biome + instancing
-  (trees/rocks/debris/craters). Procedural textures generated once, cached.
-- Physics: ≤ ~200 active rigid bodies/biome; sleep static props; vehicle + carried
-  parts + enemies are the live set. Fixed 30 Hz physics, render interpolated to
-  frame rate.
-- Snapshot bandwidth target: < ~10 KB/s per client at 4 players (quantized deltas).
-
-## 11. Key risks & mitigations
-
-| Risk | Mitigation |
+### Stack
+| | |
 |---|---|
-| **Physics determinism** drift (float/WASM) | Single Rapier build everywhere; fixed dt; stable body order; snapshot-hash determinism test in CI; server stays authoritative so any drift is corrected, not fatal |
-| **Networked physics** feel (jitter on carried/vehicle bodies) | Server-auth + interpolation; predict only the local character; short extrapolation; tune snapshot rate |
-| **Scope** (3 biomes × full loop) | Vertical slice first (Garage + Mountains end-to-end) before replicating; levels are data so biomes 2–3 reuse systems |
-| **Asset volume** vs cartoony polish | Procedural-first; only vehicles/HDRIs are curated glTF; juice via VFX/shaders not megascans |
-| **Voice/WebRTC** complexity | Ship text/proximity-less first; add WebRTC mesh in a later phase; never block core loop on it |
-| **Web network policy** limiting installs/CDN | Vendor critical assets; keep deps lean; document required policy |
-| **Co-op-gated steps** blocking solo | Every hero step has a slower solo mechanical substitute (clamp/prop/override) |
+| Language / build | TypeScript (strict), Vite 5, ES2022 |
+| Rendering | three.js 0.169; `postprocessing` + N8AO |
+| Physics | Rapier 3D (`@dimforge/rapier3d-compat` 0.21, WASM) |
+| Tests | vitest 2 (node environment, `test/**/*.spec.ts`) |
+| Browser harnesses | Puppeteer with SwiftShader (software GL) |
+| Fonts / audio | @fontsource Barlow Condensed + Inter; Kenney CC0 `.ogg` foley plus synthesis |
 
----
+## 2. The loop
 
-*Build order and acceptance criteria: [`ROADMAP.md`](ROADMAP.md).*
+`src/client/game.ts` owns a session:
+
+- It runs a **fixed 60 Hz sim step** (`DT = 1/60` from `shared/constants.ts`),
+  with at most 5 substeps per frame; if it falls further behind it drops the
+  backlog.
+- After each step, `view.capture()` stores poses, and the frame draws
+  **interpolated** between the last two (`alpha = acc / DT`).
+- Input becomes an `Intent`, a per-step snapshot of movement, look, use and
+  interact. The `World.command()` calls are discrete: slot, cycle,
+  flashlight, lights, horn, unflip, fuse, valve, commitValves, closePanel.
+- The sim reports everything through `SimEvent`s (`src/sim/events.ts`): bolt
+  loosened, part on, zap, wolf lunge, say, objective, fail…. `Game.drain()`
+  turns them into sound, particles, camera shake, HUD stamps and toasts. The
+  sim never knows how anything is presented.
+
+## 3. The sim (`src/sim/`)
+
+### World (`world.ts`)
+`World.create(level, { assist })` builds the runtime from a `LevelDef`.
+`step(intent, dt)` then runs, in order:
+
+1. Movement on foot, then `updateFocus` (what the crosshair is on), then the
+   E / LMB actions and drop / throw.
+2. Vehicle control, then `phys.step`, then syncing item and vehicle poses.
+3. Integrity and fail checks.
+4. `Machine.refresh` for every machine, which emits `systemGo` / `allGo`.
+5. Flares and wolves (`combat.ts`), survival (`hazards.ts`), then the
+   **director**:
+   - triggers;
+   - the current beat's `done` / `finish`;
+   - timed Dispatch hints;
+   - checkpoints.
+6. Doors.
+
+It also holds the flags, the lore that's been found, grading inputs, and the
+**guidance helpers** (§5).
+
+### Machines: the repair model (`machine.ts`)
+A machine is a `MachineDef`, i.e. data: components plus systems.
+
+**Components:**
+- `slot`: a mount for an item kind, with bolts;
+- `cover`: a hood or lid that must be open;
+- `terminals`: battery +/−, with order rules;
+- `fluid`: a tank to pour into;
+- `panel`: a puzzle, either the fuse grid or valve balance;
+- `jack`: a jacking point.
+
+The def also has an optional `inspect` spot, a hold-E diagnosis.
+
+A **system** (tyre, battery, fuel, coolant, ignition…) is GO when all of its
+components are OK. The vehicle can start when every critical system is GO.
+
+**Steps are derived from state, never scripted.** `nextStep(sys, ctx)` walks a
+system's components in order:
+1. open the cover;
+2. terminals: negative off first, positive on first;
+3. loosen the bolts ("— 2/5 off");
+4. jack it up;
+5. take off the old part;
+6. fit the new part;
+7. torque the bolts ("— n/N tight");
+8. fluids;
+9. panels;
+10. close the cover;
+11. lower and pull out the jack.
+
+`removeStep(slot, ctx)` does the same for salvaging from a donor. Each `Step`
+is `{ text, pos?, targets[], need?, where? }`: the job-sheet line, the
+waypoint, and the exact interactable ids to use.
+
+**Poses are shared.** The client and the sim both use:
+- `hubPose` (per-wheel `dy` / `steer`), set by `Vehicle.syncHubs()`: a pinned
+  car rests, droops by `HUB_DROOP` when jacked, and follows the suspension
+  while driving;
+- `slotPoint(slot, local)`;
+- `boltPos(slot, i)`.
+
+So a nut is clicked exactly where `machineView.ts` draws it. The wording
+helpers `plural()` and `ctx.locate(kind)` keep the text right ("the hold-down
+bolt", "it's strapped to the quad's rack").
+
+### Interaction (`interact.ts`)
+Anything usable is an `Interactable`:
+- an id;
+- a label;
+- a verb: `tap | hold | loosen | torque | pour`;
+- a `TargetBox` (centre, half-extents, yaw, `offCap`, `slack`);
+- a priority;
+- an optional `disabled` reason, shown greyed out.
+
+`pickFocus` picks what the crosshair is on:
+- **Two passes:** real targets (priority ≥ 0) first, then fallback volumes
+  (inspect, doors, vehicle entry).
+- **Score:** `t + 3·offCentre − 0.2·priority`, plus `DISABLED_PENALTY` (0.6)
+  when disabled, so a greyed prompt never steals focus from a usable one.
+- If no ray hits, an aim-assist cone applies.
+- `offCap` caps the off-centre penalty for big targets like a tyre disc.
+  `slack` is how much a collider may overlap the face before the target
+  counts as occluded.
+
+The World keeps focus **sticky** while you hold or torque, as long as you
+stay within 0.11 m.
+
+**Target id scheme** (used by the sim, the highlight, the audit and tests):
+
+```
+item:<id>                              a loose item
+machine:<key>:<kind>:<id>              kind ∈ bolt|slot|cover|term|panel|fluid|jack|inspect|ghost
+vehicle:<key>:enter | :rack | :unrack:<itemId>   vehicles and their racks
+door:<id>                              doors
+station:<id>                           level stations (clock, locker, map board, pull cord…)
+```
+
+### Other modules
+| File | What |
+|---|---|
+| `items.ts` | 19 item kinds (`ITEM_DEFS`) and `ItemManager`. Item states: `world / held / belt / pocket / mounted / racked / gone`. The belt holds the wrench, flashlight, flare and medkit; the pocket holds keys; everything else goes in your hands. Heavy parts slow you to 0.72× and stop sprinting. |
+| `player.ts`, `movement.ts` | A kinematic character controller with a Quake-style velocity model: bunny-hop, optional autohop, stamina. `BELT_SLOTS = 4`. |
+| `vehicle.ts` | Rapier raycast vehicle. Handles pinning (chocked / on blocks), creep, unflip and `syncHubs`, and holds the rack (the flatbed: any stowed part can be taken back). |
+| `physics.ts` | Rapier wrapper: collision groups `G`, surfaces, `castRay`. |
+| `terrain.ts` | An authored heightfield: noise, plus features, roads and pads. **One grid** feeds the collider, the mesh, grass, and gameplay queries (`heightAt`). |
+| `combat.ts` | Wolves: idle → stalk → telegraph (0.75 s) → lunge → recover. Pack discipline allows one attacker at a time. Flares scare them within 13 m. Wrench swing; block. |
+| `hazards.ts` | Cold above an altitude, warmth sources, fall damage, regen, medkits. `LevelDef.safe` keeps the tutorial unfailable. |
+| `grade.ts` | S–D grading from time vs par, vehicle condition, finds, side jobs and injuries. |
+| `puzzles/` | `fuseGrid` (lights-out style, seeded), `valveBalance` (coupled gauges, lever commit), `boltTorque` (tests only). |
+
+**Randomness:** sim code uses `makeRng(seed)` from `shared/math.ts`, never
+`Math.random` or `Date.now`, so levels and tests play the same way every
+time.
+
+## 4. Content (`src/content/`)
+
+- **`levels/types.ts`** defines `LevelDef` and `BeatDef`. The main
+  `LevelDef` fields:
+  - `id, title, subtitle, env, terrain, hour, spawn`;
+  - `statics, props, nature, items, machines, stations, doors, wolves`;
+  - `beats, side, triggers, hazards, warmth, lore, par, safe, guidance`;
+  - `intro, outro, briefing, ground, rooms, lostY`.
+- **A beat** is:
+  - `text`, `detail`;
+  - `marker(w)`: the waypoint;
+  - `targets(w)`: the ids that glow;
+  - `start`, `done(w)`, `finish`;
+  - `hints: [seconds, line][]`;
+  - `checkpoint` + `restore(w)`;
+  - `hour`.
+- **Levels are factories** (`makeDepot`, `makeRidge`, `makeSandbox`)
+  registered in `levels/index.ts` as `LEVELS`.
+- **`vehicles/`** holds the machine definitions: Betsy, the Ridgeback, and
+  the donors (ranger pickup, logging truck, ATV, generator). `common.ts` has
+  the `lugNuts` / `wheelSlot` helpers.
+- **`kit.ts`: `Kit`** builds colliders and prop placements from the *same
+  numbers*, so walls you see are walls you hit. `furnish()` places common
+  furniture with `FOOT` footprints.
+- **`nature.ts`:** deterministic tree and rock scatter, plus its colliders.
+
+## 5. Guidance: how the game tells you what to do
+
+This is the contract behind "every step says what, where and how"
+(see [gameplay-issues.md](gameplay-issues.md)).
+
+- **What:**
+  - the objective card is `BeatDef.text` / `detail`;
+  - the job sheet (Tab) lists each system's `nextStep().text`;
+  - the prompt under the crosshair is the focused interactable's label, or
+    its disabled reason.
+- **Where:**
+  - the waypoint is `BeatDef.marker`;
+  - for machine steps, `World.markerFor(step)` puts it on the part to fetch,
+    or on the rack it's strapped to.
+  - The HUD hides the diamond once you're on the target.
+- **Which part:** `World.guide()` returns the interactables that the current
+  beat's `targets(w)` names:
+  - if `targets` is omitted, whatever is at the marker;
+  - if it's `null`, nothing.
+  
+  `targetsFor(step)` maps a machine step to ids, including the
+  `item:` / `vehicle:<key>:unrack:<id>` ids for a part you still need to
+  fetch.
+- **Hands:** `World.handsFor(step)` rewrites a step when you're holding the
+  wrong thing:
+  - "Strap the X to the quad's rack (E at the rack) — then: …" when the part
+    is worth keeping (`worthKeeping`) and a rack is in range (`stowRack`);
+  - otherwise "Put the X down (G) — then: …".
+  
+  `whereIs(kind)` reports whether a part is in your hands, on your belt, on a
+  rack, in the world, or nowhere.
+- **The glow:**
+  - `View.updateHighlight` draws a warm focus overlay, red-orange when the
+    focus is disabled;
+  - the guide targets get an amber "breath" (`render/highlight.ts`);
+  - a carried part shows its ghost slot in green if it fits, amber if it's
+    blocked.
+- **When the glow shows** depends on `settings.accessibility.guidance`:
+  - `always` / `off` do what they say;
+  - `auto` follows `LevelDef.guidance`. That's `'always'` in the tutorial,
+    and in missions it comes on after 20 s on a step (`GUIDE_DELAY` in
+    `view.ts`).
+- **Failure:** `World.lastHurtBy` (wolf / fall / crash / cold) chooses the
+  fail-screen tip, and retry restores the last checkpoint.
+
+## 6. The client (`src/client/`)
+
+| Area | Files |
+|---|---|
+| Boot & screens | `main.ts`: title (live 3D backdrop), contract board, briefing, results, failed; `?level` / `?q`; the dev bridge `window.__mech`; the `beforeunload` guard; keyboard lock in fullscreen |
+| Session | `game.ts`: fixed step, event → fx wiring, job sheet, panel mode, bolt toasts |
+| Input | `input.ts`: pointer lock, keyboard and gamepad (`PAD` map). Ctrl combinations are swallowed. `bindings.ts` has `DEFAULT_BINDS`, all rebindable. |
+| Settings | `settings.ts`: `localStorage` key `mech.settings.v2`, deep-merged over the defaults. `SETTINGS_REV` + `migrate()` move old saves forward (for example, crouch from Ctrl to C). |
+| Progress | `progress.ts` (`mech.progress.v2`, `CAMPAIGN`: depot → ridge); best times in `shared/timer.ts` (`mech.best.v1`) |
+| HUD | `ui/hud.ts` + markup in `index.html`. `placePrompt()` keeps the prompt clear of the subtitle and carry line; `panelProgress()` shows puzzle progress. Menus are in `ui/menu.ts`, the other screens in `ui/shell.ts`. |
+| Audio | `audio/mixer.ts`: samples plus a synthesized engine, ambience, radio voice and score; `meter()` for audiocheck |
+| Cinematics | `cinematics.ts`: the Ridge cold open |
+
+### Rendering (`src/client/render/`)
+- **`view.ts`** builds the scene from the `World` and the `LevelDef`, and
+  draws interpolated poses. It also owns:
+  - the highlight;
+  - `resolveTarget(id)`, which maps a target id to the drawn object;
+  - `auditTargets()`, which reports "no drawn object", "clickable but not
+    drawn" and "click point off the drawn part" (used by `targetcheck.mjs`).
+- **The look.** `stylized.ts` has `styl()`, a patched `MeshStandardMaterial`
+  with wrap light, rim light, world-space noise, sun-tinted height fog and
+  wind, plus the `MAT` presets. There's also:
+  - `sky.ts` (time of day);
+  - `terrainView.ts` + `biome.ts` (ground colour per `ground` rule, with
+    `feather` blending);
+  - `grass.ts` (a GPU blade lattice);
+  - `foliage.ts` (merged, vertex-coloured canopies, which must be closed;
+    `test/foliage.spec.ts` checks this);
+  - `water.ts`, `particles.ts`.
+- **Models:**
+  - `vehicles/*.ts` (Betsy, the Ridgeback, the donors) and `kit/*.ts`
+    (buildings, props, Ridge props), registered by name in
+    `kit/registry.ts`;
+  - `machineView.ts` draws live repair state (nuts, jack, hood, clamps,
+    wheels) from the shared poses;
+  - `viewmodel.ts` / `itemModels.ts` draw the held tool.
+- **Post** (`post.ts`): RenderPass → N8AO (Medium and up) → SMAA → bloom →
+  grade → ACES → vignette → film grain. If the chain fails, it falls back to
+  a plain ACES render.
+
+### Quality presets
+| | Low | Medium (default) | High |
+|---|---|---|---|
+| Pixel ratio cap | 1 | 1.5 | 2 |
+| Shadow map | 2048 | 4096 | 8192 |
+| Grass radius / spacing | 26 m / 0.17 | 44 m / 0.12 | 60 m / 0.10 |
+| N8AO + grain | off | on | on |
+| Particles | 300 | 600 | 900 |
+| Terrain LOD rings | 140 / 320 m | 220 / 480 m | 320 / 650 m |
+
+**Performance target:** 60 fps at Medium on an RTX 5060-class GPU. Check the
+draw calls with `__mech.stats()`.
+
+## 7. Testing
+
+**Unit and headless tests** (`npm test`, all in node):
+
+| Spec | Covers |
+|---|---|
+| `depot.playthrough`, `ridge.playthrough` | Each level start to finish through the real aim → `pickFocus` → intent pipeline (`test/bot.ts`); the Ridge also restores from every checkpoint |
+| `guidance` | `GuideBot` (`test/guide.ts`) follows only the waypoint, the glow and the prompt text: Depot to "start her up", and every on-foot Ridge step. Driving beats are stood in by placing the quad. |
+| `interact.audit` | Aims at every station, door, cover and item from many spots in both levels |
+| `lugnuts` | The wheel job: nuts stay off, hub-centre aim, jacked-hub targets, wobble keeps the hold |
+| `machine`, `puzzles` | Repair model and puzzles |
+| `physics`, `hazards`, `combat` | Movement, falls and cold, wolf pack turn-taking |
+| `ridge.smoke`, `grade`, `timer`, `settings`, `foliage` | Other checks; `foliage` imports three to check the canopy meshes |
+
+- **`Bot`** moves by teleporting, but acts only through real focus and
+  intents: `approach`, `aim`, `tapAt`, `holdAt`, `loosenAt`, `torqueAt`.
+- **`GuideBot.follow({ until, stand?, maxMoves })`** throws a readable
+  failure ("stuck on …", "nothing glows at the waypoint") naming the step a
+  player would get stuck on.
+
+**Browser harnesses** (`tools/`; Puppeteer + SwiftShader, not in CI):
+
+| Tool | Server | Does |
+|---|---|---|
+| `targetcheck.mjs [levels…]` | static dev-mode build + `vite preview` :4193 | Stands at 6 spots around every machine and at every station, both as found and opened up, and runs `auditTargets()`. Exits 1 on any mismatch. |
+| `walkthrough.mjs <level> [out]` | dev server :4194 | Loads `GuideBot` into the real page and takes a screenshot each time the step changes. Don't edit files mid-run. |
+| `playtest.mjs [--smoke] [--q] [--grass] [--head] [--out]` | dev server :4173 | Tour of the title, contracts, depot (real E and F key presses), yard, pause, Ridge stops, night, results and failed screens |
+| `audiocheck.mjs` | dev server :4175 | Samples `__mech.audio()` across scenes; fails on NaN, clipping or silence |
+| `shot.mjs <out> <script.json> [level] [q]` | dev server :4190 | Ad-hoc scripted screenshots |
+| `probe-terrain.ts` | none | `npx vite-node tools/probe-terrain.ts`: Ridge road grades and profiles |
+
+**CI** (`.github/workflows/ci.yml`, Node 20): `npm ci` (with
+`PUPPETEER_SKIP_DOWNLOAD=true`) → typecheck → test → build. It runs on `main`,
+on `claude/**`, and on PRs to `main`.
+
+## 8. Deploy
+
+`.github/workflows/deploy.yml` runs on a push to `main` or on manual
+dispatch. It typechecks, then builds with `vite build --base=/the-mechanics/`,
+then publishes `dist/` to GitHub Pages. No runtime configuration or
+environment variables are needed.
+
+## 9. Known gaps
+
+- **No automated driving check.** Travel beats are covered by teleporting in
+  the playthroughs and guidance bot; see issue class #10.
+- **No unit test for the fuse grid puzzle.** It's covered by the
+  playthroughs.
+- **Dead constants.** `shared/constants.ts` has some unused ones left from
+  the prototype (`KART_*`, `GATE_SPEED`).

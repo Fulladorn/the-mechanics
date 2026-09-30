@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Co-op survival puzzle game — repair a vehicle, drive it to safety.",
+  "description": "First-person repair game in the browser — fix a vehicle in a bad place, drive it out.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

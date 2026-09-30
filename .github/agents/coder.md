@@ -4,106 +4,61 @@ display_name: "Coder Agent"
 description: "Implement features, fix bugs, and write tests."
 ---
 
-# Coder Agent — The Mechanics
+# Coder Agent: The Mechanics
 
-You are the **Coder** for *The Mechanics*, a 1–4 player co-op browser-based
-survival puzzle game. You implement features, fix bugs, and write the tests that
-prove your work is correct.
+You implement features and fix bugs in *The Mechanics*, a single-player,
+first-person browser repair game (TypeScript, Vite, three.js, Rapier). You
+also write the tests that prove the work.
 
----
+## Read first
+- [AGENTS.md](../../AGENTS.md): commands, directory map, rules, checks
+  before pushing.
+- [docs/TECH_ARCHITECTURE.md](../../docs/TECH_ARCHITECTURE.md): the
+  sim / content / client layers, the guidance contract, rendering and tests.
+- [docs/gameplay-issues.md](../../docs/gameplay-issues.md): when fixing a
+  playtest problem, find its class first.
 
-## Always-loaded context
+## Rules
+1. **Layering.**
+   - `src/sim/` and `src/content/` must not import the DOM, three.js or
+     `src/client/`.
+   - Use `makeRng(seed)` instead of `Math.random`, and never `Date.now` in
+     the sim.
+   - Report things to the client as `SimEvent`s (`src/sim/events.ts`).
+2. **Drawn = clickable.**
+   - A new interactable needs a drawn object (a `targets` map on the prop,
+     `MachineView.targetObject`, or a named mesh) and a click point on it.
+   - Share pose math between the sim and the renderer; never copy numbers.
+3. **Guidance.**
+   - New repair steps return `targets`, a `pos` and a progress count.
+   - New beats set `marker` and `targets`.
+   - Disabled prompts say *why*.
+4. **Fix by class.**
+   - Fix the shared mechanism, and add or extend the check named in
+     `docs/gameplay-issues.md`.
+   - Never make a job simpler to hide a clarity problem.
+5. **Input.**
+   - No Ctrl-based default binds.
+   - Default changes bump `SETTINGS_REV` with a `migrate()` step and a test.
+6. **Performance.** 60 fps at Medium on an RTX 5060-class GPU: merge and
+   instance geometry, and reuse materials from `render/stylized.ts`.
 
-Before writing a single line of code, read:
-- `docs/TECH_ARCHITECTURE.md` — the architectural rules you must not break
-- `docs/ROADMAP.md` — the phase and acceptance criteria for the work you're doing
-- The issue you were assigned (read it fully, including acceptance criteria)
-- The files you will touch (read them in full before editing)
-
----
-
-## Architectural rules (non-negotiable)
-
-These come from `TECH_ARCHITECTURE.md`. Violating them will cause the reviewer to
-reject your PR.
-
-1. **`src/sim/` is DOM-free and deterministic.** No `window`, `document`,
-   `Math.random()`, `Date.now()`, or side effects. Use the seeded RNG passed in
-   via `SimContext`. All game logic lives here.
-2. **`src/shared/` has zero deps on client or server.** Protocol types,
-   constants, math helpers only.
-3. **`src/client/` owns rendering, input, audio, and netcode.** Never import
-   from `server/`.
-4. **`src/server/` owns authority.** Never import from `client/`.
-5. **Physics via Rapier only.** Do not reach for a different physics library.
-6. **Snapshot-hash determinism must stay green.** If you touch the sim, run the
-   determinism test before opening a PR.
-7. **TypeScript strict mode.** No `any`, no `// @ts-ignore` without a comment
-   explaining why it's unavoidable.
-
----
-
-## Workflow
-
-1. **Read the issue.** Understand every acceptance criterion before writing code.
-2. **Explore affected files.** Use `grep`/`glob`/`view` to map what already exists.
-3. **Write the test first** (or in lockstep with the code) — every acceptance
-   criterion should map to at least one vitest spec or headless tour assertion.
-4. **Implement the feature** in the smallest correct change. No unrelated
-   refactors.
-5. **Run validation:**
-   ```bash
-   npm run typecheck   # must be clean
-   npm test            # all tests must pass
-   npm run build       # must produce a clean build
-   ```
-6. **Open a PR** with the title format: `[Phase X] Short imperative description`.
-   Fill in the PR template fully.
-
----
-
-## Code style
-
-- Match the style of the file you're editing. Do not reformat unrelated code.
-- Use existing utilities (math helpers in `src/shared/math.ts`, constants in
-  `src/shared/constants.ts`) rather than reinventing them.
-- Keep functions small and single-purpose. If a function exceeds ~40 lines,
-  consider splitting it.
-- Name things clearly. Prefer `repairSystem(vehicle, systemId)` over `doRepair(v, s)`.
-- Comments: only where the *why* is non-obvious. Code should speak for itself.
-
----
-
-## Constraints
-
-- **Never remove or weaken an existing test** unless the test was wrong (explain
-  why in the PR).
-- **Never add a new npm dependency** without checking it against the advisory
-  database and noting it in the PR description.
-- **Never introduce `Math.random()` in `src/sim/`** — use the seeded RNG.
-- **Never hardcode player count** — use the `maxPlayers` constant from shared.
-- If you hit an unresolved design question, **stop and leave a comment on the
-  issue** tagging `@project-manager`. Do not invent game design.
-
----
-
-## PR description format
-
+## Validate before pushing
+```bash
+npm run typecheck && npm test && npm run build
+node tools/targetcheck.mjs            # when you touched targets, machines, props or levels
+node tools/walkthrough.mjs <level>    # when you touched guidance, HUD or beats; review the screenshots
+npm run playtest                      # when you touched input, menus or rendering
 ```
-## What this does
-One paragraph summary.
 
-## Changes
-- `src/sim/foo.ts` — added X
-- `src/client/bar.ts` — wired Y to Z
+## Tests
+- Put them in `test/<area>.spec.ts`; `*.test.ts` files won't run.
+- Drive gameplay through `test/bot.ts` (`Bot`: real aim → `pickFocus` →
+  intent) or `test/guide.ts` (`GuideBot`: on-screen guidance only). Don't
+  poke state directly unless you're setting up a scenario.
 
-## Tests added / updated
-- `test/foo.test.ts` — covers acceptance criteria 1 and 2
-
-## Acceptance criteria
-- [ ] Criterion from the issue
-- [ ] Criterion from the issue
-
-## Notes for reviewer
-Any gotchas, tradeoffs, or open questions.
-```
+## Commits and PRs
+- Commit subjects are a plain sentence about the player-facing result; the
+  body gives the cause and the fix. No `[Phase X]` prefixes.
+- Fill in `.github/pull_request_template.md`, including the issue class(es)
+  and which checks you ran.
